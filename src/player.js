@@ -5,7 +5,7 @@
 // model + warna per kategori — semua geometri prosedural Three.js, low-poly.
 import * as THREE from 'three';
 import { GRAVITY, JUMP_VELOCITY, MAX_SPEED, ACCEL, FRICTION, clamp,
-         terrainHeight, resolveCircleVsAABBs, isInRiver, isOnBridge } from './physics.js';
+         terrainHeight, resolveCircleVsAABBs, isInRiver, isOnBridge, waterDepth, WATER_Y } from './physics.js';
 import { defaultCustom, sanitizeCustom, hexOf,
          SKIN_TONES, HAIR_COLORS, PALETTE, FRAME_COLORS } from './customization.js';
 
@@ -271,6 +271,11 @@ export class Player {
     this.airBlend = 0;   // 0 menapak → 1 melayang (pose lompat)
     this.breathPhase = 0;
     this.landDip = 0;    // crouch sesaat setelah mendarat (meluruh)
+    this.swimming = false; // di air dalam: mengapung + berenang
+    this.swimBlend = 0;    // 0 jalan ↔ 1 renang (dihaluskan)
+    this.swimPhase = 0;    // fase tendangan/dayungan
+    this.swimAmp = 0;      // amplitudo renang terhaluskan
+    this._bobPhase = 0;    // naik-turun mengapung
     this._wasAir = false;
     this.group = buildCharacter(gender, this.custom);
     this.group.position.set(x, terrainHeight(x, z), z);
@@ -303,6 +308,7 @@ export class Player {
     this.group.position.set(this.x, this.y, this.z);
   }
   jump() {
+    if (this.swimming) return false; // di air tidak bisa lompat — berenang saja
     if (this.yOff <= 0.01) { this.vy = JUMP_VELOCITY; this.yOff = 0.01; return true; }
     return false;
   }
@@ -312,12 +318,14 @@ export class Player {
     // maju = -Z, kanan = +X.
     const mx = move.x, mz = -move.y;
     const mag = move.mag || 0;
+    // Berenang bila di sungai DAN air cukup dalam (di atas pinggang).
+    this.swimming = isInRiver(this.x, this.z) && waterDepth(this.x, this.z) > 0.9;
     this.moving = mag > 0.05;
     if (this.moving) {
       this.vx += mx * ACCEL * dt;
       this.vz += mz * ACCEL * dt;
       const sp = Math.hypot(this.vx, this.vz);
-      const max = MAX_SPEED * (0.4 + 0.6 * mag) * (running ? 1.6 : 1);
+      const max = MAX_SPEED * (0.4 + 0.6 * mag) * (running ? 1.6 : 1) * (this.swimming ? 0.55 : 1);
       if (sp > max) { this.vx *= max / sp; this.vz *= max / sp; }
       this.facing = Math.atan2(this.vx, this.vz);
     } else {
@@ -338,18 +346,31 @@ export class Player {
       const r2 = resolveCircleVsAABBs(nx, nz2, PLAYER_RADIUS, colliders);
       nx = r2.x; nz2 = r2.z;
     }
+    // Perenang tidak bisa lewat bawah jembatan (kepala mentok papan).
+    if (this.swimming && isOnBridge(nx, nz2)) { nx = this.x; nz2 = this.z; }
     this.x = clamp(nx, -78, 78);
     this.z = clamp(nz2, -78, 78);
-    // Gravitasi + lompat.
+    // Gravitasi + lompat — di air: mengapung, bukan jatuh.
     const wasAir = this._wasAir;
-    if (this.yOff > 0 || this.vy > 0) {
-      this.vy -= GRAVITY * dt;
-      this.yOff += this.vy * dt;
-      if (this.yOff <= 0) { this.yOff = 0; this.vy = 0; }
+    if (this.swimming) {
+      this.vy = 0;
+      this._wasAir = false;
+      // Mengapung: permukaan air setinggi dada, naik-turun pelan.
+      const targetYOff = (WATER_Y - 1.15) - this.groundAt(this.x, this.z) + Math.sin(this._bobPhase) * 0.05;
+      this.yOff += (targetYOff - this.yOff) * Math.min(1, dt * 6);
+      this._bobPhase += dt * 2.2;
+    } else {
+      // Keluar dari air: yOff negatif kembali ke 0 (naik ke darat).
+      if (this.yOff < 0) this.yOff = Math.min(0, this.yOff + dt * 2.5);
+      if (this.yOff > 0 || this.vy > 0) {
+        this.vy -= GRAVITY * dt;
+        this.yOff += this.vy * dt;
+        if (this.yOff <= 0) { this.yOff = 0; this.vy = 0; }
+      }
+      // Baru mendarat (sebelumnya di udara, kini menapak): picu crouch.
+      if (wasAir && this.yOff === 0 && this.vy === 0) this.landDip = 1;
+      this._wasAir = this.yOff > 0.01 || this.vy > 0;
     }
-    // Baru mendarat (sebelumnya di udara, kini menapak): picu crouch.
-    if (wasAir && this.yOff === 0 && this.vy === 0) this.landDip = 1;
-    this._wasAir = this.yOff > 0.01 || this.vy > 0;
     // Pose + animasi jalan (rig berartikulasi — lihat buildCharacter).
     // Konvensi rotation.x: negatif = ayun ke depan, positif = ke belakang;
     // lutut positif = betis menekuk ke belakang.
@@ -363,6 +384,10 @@ export class Player {
       const stepLen = 0.45 + 0.11 * sp;
       this.walkPhase += (sp * dt * Math.PI) / stepLen;
     }
+    // Tendangan renang: irama tetap walau laju berubah.
+    if (this.swimming && sp > 0.05) this.swimPhase += dt * (5 + sp * 1.5);
+    this.swimAmp += ((this.swimming ? clamp(sp / 3.3, 0, 1) : 0) - this.swimAmp) * Math.min(1, dt * 6);
+    this.swimBlend += ((this.swimming ? 1 : 0) - this.swimBlend) * Math.min(1, dt * 6);
     // Amplitudo jalan + blend udara dihaluskan → transisi jalan↔diam
     // dan tanah↔udara tanpa lompatan pose.
     this.walkAmp += ((airborne ? 0 : speedF) - this.walkAmp) * Math.min(1, dt * 8);
@@ -387,19 +412,28 @@ export class Player {
     const bobW = 0.045 * amp * Math.abs(sinP); // bob 2x frekuensi langkah
     const leanW = 0.02 + 0.08 * speedF;        // condong ∝ kecepatan
     const swayW = 0.03 * amp * sinP;           // goyang berat badan
+    // --- Pose berenang: badan condong ke depan, tangan mendayung bergantian,
+    // kaki menendang kecil-cepat. Di-blend dari pose jalan via swimBlend.
+    const sb = this.swimBlend;
+    const kick = Math.sin(this.swimPhase), kick2 = Math.sin(this.swimPhase + Math.PI);
+    const sAmp = 0.4 + 0.6 * this.swimAmp;
+    const legLxS = -0.3 * sAmp * kick, legRxS = -0.3 * sAmp * kick2;
+    const kneeLxS = 0.5 + 0.35 * Math.max(0, kick), kneeRxS = 0.5 + 0.35 * Math.max(0, kick2);
+    const armLxS = -1.1 + 0.8 * kick, armRxS = -1.1 + 0.8 * kick2;
     const u = this.group.userData;
     const L = (w, a) => (1 - ab) * w + ab * a; // blend menapak ↔ udara
-    u.legL.rotation.x = L(legLxW, -0.35);
-    u.legR.rotation.x = L(legRxW, 0.25);
-    u.kneeL.rotation.x = L(kneeLxW, 0.55) + 0.35 * this.landDip * (1 - ab);
-    u.kneeR.rotation.x = L(kneeRxW, 0.85) + 0.35 * this.landDip * (1 - ab);
-    u.armL.rotation.x = L(armLxW + (1 - amp) * (0.04 + 0.02 * breath), -0.45);
-    u.armR.rotation.x = L(armRxW + (1 - amp) * (0.04 + 0.02 * breath), -0.45);
-    u.elbowL.rotation.x = L(elbLxW, -0.5);
-    u.elbowR.rotation.x = L(elbRxW, -0.5);
-    u.upper.position.y = (1 - ab) * (bobW + 0.012 * breath * (1 - amp) - 0.05 * this.landDip);
-    u.upper.rotation.x = L(leanW, 0.06);
-    u.upper.rotation.z = (1 - ab) * swayW;
+    const B = (walk, swim) => walk * (1 - sb) + swim * sb; // blend jalan ↔ renang
+    u.legL.rotation.x = B(L(legLxW, -0.35), legLxS);
+    u.legR.rotation.x = B(L(legRxW, 0.25), legRxS);
+    u.kneeL.rotation.x = B(L(kneeLxW, 0.55), kneeLxS) + 0.35 * this.landDip * (1 - ab) * (1 - sb);
+    u.kneeR.rotation.x = B(L(kneeRxW, 0.85), kneeRxS) + 0.35 * this.landDip * (1 - ab) * (1 - sb);
+    u.armL.rotation.x = B(L(armLxW + (1 - amp) * (0.04 + 0.02 * breath), -0.45), armLxS);
+    u.armR.rotation.x = B(L(armRxW + (1 - amp) * (0.04 + 0.02 * breath), -0.45), armRxS);
+    u.elbowL.rotation.x = B(L(elbLxW, -0.5), -0.6);
+    u.elbowR.rotation.x = B(L(elbRxW, -0.5), -0.6);
+    u.upper.position.y = (1 - sb) * (1 - ab) * (bobW + 0.012 * breath * (1 - amp) - 0.05 * this.landDip);
+    u.upper.rotation.x = B(L(leanW, 0.06), 0.5);
+    u.upper.rotation.z = (1 - ab) * swayW * (1 - sb);
     this.group.position.set(this.x, this.y, this.z);
     // Hadap arah gerak (lerp sudut).
     let df = this.facing - this.group.rotation.y;

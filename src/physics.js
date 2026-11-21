@@ -27,6 +27,10 @@ export const RIVER_HALF = 3.4;
 export const BRIDGE_Z = 6;      // jembatan kayu di z = 6
 export const BRIDGE_HALF = 2.4; // lebar jembatan (sumbu z)
 
+export const WATER_Y = 0.45; // permukaan air sungai (sinkron dengan world.js)
+export function waterDepth(x, z) { return WATER_Y - terrainHeight(x, z); }
+export function riverDistance(x, z) { return Math.max(0, Math.abs(x - riverCenterX(z)) - RIVER_HALF); }
+
 export function isOnBridge(x, z) {
   return Math.abs(z - BRIDGE_Z) < BRIDGE_HALF && x > -32 && x < -16;
 }

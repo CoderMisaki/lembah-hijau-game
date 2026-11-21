@@ -11,7 +11,7 @@ import { t } from './i18n.js';
 import { Sfx } from './audio.js';
 import { saveGame, loadGame, clearSave, buildSaveData } from './save.js';
 import { Input } from './input.js';
-import { DynamicBox, terrainHeight } from './physics.js';
+import { DynamicBox, terrainHeight, riverDistance, smoothstep } from './physics.js';
 import { attachDebug } from './debug.js';
 import { defaultCustom, sanitizeCustom } from './customization.js';
 import {
@@ -79,6 +79,8 @@ class Game {
     this._cloudBusy = false;
     this._cloudTimer = null;
     this._introUntil = 0;
+    this._wasSwimming = false;
+    this._waterLevel = -1;
     this.fps = 60;
     this.started = false;
     this._fpsAccum = 0; this._fpsFrames = 0; this._lowFpsTime = 0; this._lastDegrade = 0;
@@ -275,6 +277,14 @@ class Game {
       this.world.crate.rotation.y += (Math.hypot(crate.vx, crate.vz) * dt) * 0.4;
       this.animals.update(dt, t);
       this.updateInteraction();
+      // Suara air: penuh di tepi sungai, memudar sampai hilang ~22 m.
+      const dRiver = riverDistance(this.player.x, this.player.z);
+      const wl = dRiver <= 0 ? 1 : 1 - smoothstep(3, 22, dRiver);
+      if (Math.abs(wl - this._waterLevel) > 0.02) { this._waterLevel = wl; this.sfx.setWaterLevel(wl); }
+      // Cipratan saat baru masuk air.
+      const sw = this.player.swimming;
+      if (sw && !this._wasSwimming) this.sfx.play('splash');
+      this._wasSwimming = sw;
       // Autosave tiap 10 detik.
       this._saveTimer += dt;
       if (this._saveTimer > 10) { this._saveTimer = 0; this.save(); }

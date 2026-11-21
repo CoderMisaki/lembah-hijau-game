@@ -1,7 +1,7 @@
 // world.js — lembah pastoral low-poly: terrain, pegunungan, sungai mengalir,
 // jembatan kayu, rumah, kios toko, kandang, jalan tanah, pohon (instanced), pagar.
 import * as THREE from 'three';
-import { terrainHeight, riverCenterX, RIVER_HALF, BRIDGE_Z, noise2, smoothstep } from './physics.js';
+import { terrainHeight, riverCenterX, RIVER_HALF, BRIDGE_Z, WATER_Y, noise2, smoothstep } from './physics.js';
 
 export const FARM_ORIGIN = { x: 12, z: 4 };
 export const FARM_COLS = 6, FARM_ROWS = 4, FARM_SPACING = 2.8;
@@ -132,16 +132,24 @@ export function buildWorld(scene) {
   group.add(mtns); group.add(snowCaps);
 
   // ---- Sungai: bidang air dengan tekstur canvas yang di-offset (terlihat mengalir)
+  // Jernih: biru lebih terang + transparan supaya dasar pasir terlihat.
   const waterCanvas = document.createElement('canvas');
   waterCanvas.width = 128; waterCanvas.height = 128;
   const wc = waterCanvas.getContext('2d');
-  wc.fillStyle = '#3f8fbf'; wc.fillRect(0, 0, 128, 128);
-  wc.strokeStyle = 'rgba(255,255,255,0.55)'; wc.lineWidth = 3;
+  wc.fillStyle = '#56a8d0'; wc.fillRect(0, 0, 128, 128);
+  wc.strokeStyle = 'rgba(255,255,255,0.75)'; wc.lineWidth = 2.5;
   for (let i = 0; i < 10; i++) {
     wc.beginPath();
     wc.moveTo(0, i * 13 + 4);
     wc.bezierCurveTo(40, i * 13, 80, i * 13 + 8, 128, i * 13 + 2);
     wc.stroke();
+  }
+  // Kilau jernih: titik-titik putih kecil (cahaya di permukaan).
+  wc.fillStyle = 'rgba(255,255,255,0.5)';
+  for (let i = 0; i < 26; i++) {
+    wc.beginPath();
+    wc.arc((i * 47) % 128, (i * 31) % 128, 1.2, 0, Math.PI * 2);
+    wc.fill();
   }
   const waterTex = new THREE.CanvasTexture(waterCanvas);
   waterTex.wrapS = waterTex.wrapT = THREE.RepeatWrapping;
@@ -155,13 +163,27 @@ export function buildWorld(scene) {
   }
   waterGeo.computeVertexNormals();
   // Phong: kilau specular matahari di permukaan + tekstur mengalir + riak vertex.
+  // Opacity diturunkan (0.88 → 0.62): air jernih, dasar sungai terlihat.
   const water = new THREE.Mesh(waterGeo, new THREE.MeshPhongMaterial({
-    map: waterTex, transparent: true, opacity: 0.88,
-    shininess: 140, specular: 0xbbddff,
+    map: waterTex, transparent: true, opacity: 0.62,
+    shininess: 180, specular: 0xddf2ff,
   }));
-  water.position.y = 0.45;
+  water.position.y = WATER_Y;
   group.add(water);
   const waterBase = waterGeo.attributes.position.array.slice(); // posisi dasar utk riak
+
+  // ---- Buih arus: garis putih kecil yang hanyut mengikuti aliran (+Z,
+  // searah offset tekstur) — air terlihat mengalir, bukan diam.
+  const FOAM_N = 24;
+  const foamGeo = new THREE.BoxGeometry(0.35, 0.03, 1.6);
+  const foamMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+  const foam = new THREE.InstancedMesh(foamGeo, foamMat, FOAM_N);
+  const foamData = [];
+  for (let i = 0; i < FOAM_N; i++) {
+    const z = -85 + Math.random() * 170;
+    foamData.push({ z, x: riverCenterX(z) + (Math.random() * 5 - 2.5), s: 0.7 + Math.random() * 0.8 });
+  }
+  group.add(foam);
 
   // ---- Jembatan kayu (papan + tiang + tali)
   const bridge = new THREE.Group();
@@ -627,7 +649,7 @@ export function buildWorld(scene) {
   }
 
   return {
-    group, colliders, water, waterTex, sun, hemi, amb, lamp, crate, crateMesh,
+    group, colliders, water, waterTex, foam, sun, hemi, amb, lamp, crate, crateMesh,
     doorPos, shopPos, penGate,
     setQuality(q) {
       quality = q || 'medium';
@@ -642,14 +664,26 @@ export function buildWorld(scene) {
     },
     update(dt, minutes) {
       elapsed += dt;
-      // Air mengalir (offset tekstur) + riak halus per-vertex.
-      waterTex.offset.y -= dt * 0.12;
+      // Air mengalir (offset tekstur lebih cepat) + riak per-vertex lebih kuat.
+      waterTex.offset.y -= dt * 0.3;
       waterTex.offset.x += dt * 0.015;
       const wp = water.geometry.attributes.position;
       for (let i = 0; i < wp.count; i++) {
-        wp.setY(i, Math.sin(waterBase[i * 3 + 2] * 0.9 + elapsed * 2.2 + waterBase[i * 3] * 0.6) * 0.06);
+        wp.setY(i, Math.sin(waterBase[i * 3 + 2] * 0.9 + elapsed * 2.6 + waterBase[i * 3] * 0.6) * 0.1);
       }
       wp.needsUpdate = true;
+      // Buih hanyut ke +Z (searah arus), wrap di ujung.
+      for (let i = 0; i < FOAM_N; i++) {
+        const f = foamData[i];
+        f.z += dt * 1.8;
+        if (f.z > 85) { f.z = -85; f.x = riverCenterX(f.z) + (Math.random() * 5 - 2.5); }
+        _dummy.position.set(f.x, WATER_Y + 0.05, f.z);
+        _dummy.rotation.set(0, 0, 0);
+        _dummy.scale.set(f.s, 1, f.s);
+        _dummy.updateMatrix();
+        foam.setMatrixAt(i, _dummy.matrix);
+      }
+      foam.instanceMatrix.needsUpdate = true;
       // Awan drift pelan ke timur, wrap di tepi.
       for (let i = 0; i < cloudPuffs.length; i++) {
         const p = cloudPuffs[i];
