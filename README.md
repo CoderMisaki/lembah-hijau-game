@@ -116,9 +116,14 @@ Tidak ada import dari CDN lain.
 - **Perbaikan orientasi (revisi):** overlay TIDAK mengandalkan hasil promise
   `lock()` — lock bisa resolve tanpa rotasi nyata (headless) atau menggantung
   tanpa settle. `startGame()` menjadwalkan re-check orientasi AKTUAL
-  (innerWidth<innerHeight / `screen.orientation.type`) segera + ~500 ms
-  kemudian; janji fullscreen/lock dibatasi timeout 1 detik. Overlay muncul
-  bila viewport benar-benar masih portrait (perangkat sentuh).
+  (innerWidth<innerHeight) segera + ~500 ms kemudian; janji fullscreen/lock
+  dibatasi timeout 1 detik. Overlay muncul bila viewport benar-benar masih
+  portrait (perangkat sentuh).
+- **Koreksi koordinator (verifikasi 21 Nov):** `screen.orientation.type`
+  DITENDANG dari penentu overlay — nilainya bisa tidak sesuai viewport nyata
+  (stale saat rotasi / di headless-emulasi tetap 'portrait-primary'), sehingga
+  overlay sempat muncul di viewport landscape. Kini HANYA innerWidth <
+  innerHeight yang dipakai; viewport adalah ground truth.
 - Kamera pembuka: spawn (6,20) + kamera intro tinggi/jauh ~4 detik pertama
   sehingga frame awal memuat petak kebun + sungai + pegunungan.
 - iOS Safari tidak mendukung orientation lock → fallback: bila perangkat touch dalam portrait, tampilkan overlay **"Putar perangkat Anda ke landscape"** (dwibahasa) sampai orientasi jadi landscape. Game tidak dimainkan dalam portrait.

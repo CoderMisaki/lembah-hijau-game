@@ -197,12 +197,13 @@ class Game {
   }
   checkOrientation() {
     // Desktop: jangan paksa apa pun. Perangkat sentuh: overlay bila viewport
-    // BENAR-BENAR masih portrait (innerWidth < innerHeight / orientation type),
-    // terlepas dari apakah lock() resolve atau tidak.
+    // BENAR-BENAR masih portrait (innerWidth < innerHeight) — HANYA itu.
+    // JANGAN pakai screen.orientation.type sebagai OR: nilainya bisa tidak
+    // sesuai viewport nyata (stale saat rotasi / di headless-emulasi tetap
+    // 'portrait-primary'), sehingga overlay bisa muncul di landscape.
+    // Viewport adalah ground truth; onResize memanggil ulang saat rotasi.
     if (!this.started || !this._isTouch) { this.ui.setOrientationOverlay(false); return; }
-    const portrait = window.innerWidth < window.innerHeight
-      || (screen.orientation && typeof screen.orientation.type === 'string'
-        && screen.orientation.type.startsWith('portrait'));
+    const portrait = window.innerWidth < window.innerHeight;
     this.ui.setOrientationOverlay(portrait);
   }
   onResize() {

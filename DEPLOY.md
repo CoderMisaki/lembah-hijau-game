@@ -33,6 +33,17 @@ npx wrangler d1 create lembah-hijau-db
 npx wrangler d1 execute lembah-hijau-db --remote --file=./schema.sql
 # Harus menampilkan 5 tabel dibuat: users, sessions, saves,
 # login_attempts, rate_limits.
+
+## 2b. (Pengujian lokal) Terapkan skema ke D1 lokal juga
+
+`wrangler dev --local` memakai database lokal KOSONG — tanpa langkah ini
+SEMUA endpoint yang menyentuh DB mengembalikan 500
+(`D1_ERROR: no such table`, terverifikasi koordinator 21 Nov 2026).
+Jalankan sekali sebelum `wrangler dev --local`:
+
+```bash
+npx wrangler d1 execute lembah-hijau-db --local --file=./schema.sql
+```
 ```
 
 ## 3. Deploy Worker API

@@ -1,6 +1,9 @@
 -- Lembah Hijau — skema D1 (Cloudflare Workers + D1, free tier).
 -- Jalankan sekali saat setup (lihat DEPLOY.md):
 --   npx wrangler d1 execute lembah-hijau-db --remote --file=./schema.sql
+-- Untuk pengujian lokal (wrangler dev --local), jalankan JUGA varian lokal
+-- (D1 lokal kosong tanpa ini -> semua endpoint DB 500 "no such table"):
+--   npx wrangler d1 execute lembah-hijau-db --local --file=./schema.sql
 
 CREATE TABLE IF NOT EXISTS users (
   username   TEXT PRIMARY KEY,       -- lowercase, 3-16 karakter [a-z0-9_]
