@@ -481,11 +481,11 @@ class Game {
   async saveNow() {
     this.save();
     if (!this.session) {
-      this.ui.toast(t(this.offlineMode ? 'savedLocal' : 'needLogin', this.state.lang));
+      this.ui.toast(t(this.offlineMode ? 'savedLocal' : 'needLogin', this.state.lang), 4000);
       return;
     }
     const ok = await this.cloudSync();
-    this.ui.toast(t(ok ? 'savedCloud' : 'savedLocal', this.state.lang));
+    this.ui.toast(t(ok ? 'savedCloud' : 'savedLocal', this.state.lang), 4000);
   }
 
   async loadNow() {

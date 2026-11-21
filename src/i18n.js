@@ -108,9 +108,9 @@ export const STRINGS = {
   // ---- Save / Load ----
   saveBtn: { id: '💾 Simpan', en: '💾 Save' },
   loadBtn: { id: '📂 Muat', en: '📂 Load' },
-  savedCloud: { id: 'Progress tersimpan (server).', en: 'Progress saved (server).' },
-  savedLocal: { id: 'Tersimpan di perangkat (offline — akan disinkron saat online).',
-                en: 'Saved on this device (offline — will sync when online).' },
+  savedCloud: { id: '✓ Berhasil tersimpan di server!', en: '✓ Progress saved to the server!' },
+  savedLocal: { id: '✓ Tersimpan di perangkat (offline — akan disinkron saat online).',
+                en: '✓ Saved on this device (offline — will sync when online).' },
   loadedCloud: { id: 'Progress dimuat dari server.', en: 'Progress loaded from the server.' },
   loadFailed: { id: 'Gagal memuat dari server.', en: 'Failed to load from the server.' },
   noServerSave: { id: 'Belum ada save di server.', en: 'No save on the server yet.' },
