@@ -462,7 +462,15 @@ class Game {
   }
 
   async cloudSync() {
-    if (!this.session || this._cloudBusy) return false;
+    if (!this.session) return false;
+    // Bila ada sync yang sedang berjalan, TUNGGU selesai lalu sync ulang —
+    // jangan langsung gagal (klik Simpan 2x cepat tidak boleh lapor "offline").
+    let waited = 0;
+    while (this._cloudBusy && waited < 10000) {
+      await new Promise((r) => setTimeout(r, 100));
+      waited += 100;
+    }
+    if (this._cloudBusy) return false;
     this._cloudBusy = true;
     try {
       const data = buildSaveData({ ...this.state, playerX: this.player.x, playerZ: this.player.z });
@@ -484,6 +492,8 @@ class Game {
       this.ui.toast(t(this.offlineMode ? 'savedLocal' : 'needLogin', this.state.lang), 4000);
       return;
     }
+    // Konfirmasi langsung terlihat saat klik (toast hasil menyusul sesudah sync).
+    this.ui.toast(t('saving', this.state.lang), 4000);
     const ok = await this.cloudSync();
     this.ui.toast(t(ok ? 'savedCloud' : 'savedLocal', this.state.lang), 4000);
   }

@@ -108,6 +108,7 @@ export const STRINGS = {
   // ---- Save / Load ----
   saveBtn: { id: '💾 Simpan', en: '💾 Save' },
   loadBtn: { id: '📂 Muat', en: '📂 Load' },
+  saving: { id: 'Menyimpan…', en: 'Saving…' },
   savedCloud: { id: '✓ Berhasil tersimpan di server!', en: '✓ Progress saved to the server!' },
   savedLocal: { id: '✓ Tersimpan di perangkat (offline — akan disinkron saat online).',
                 en: '✓ Saved on this device (offline — will sync when online).' },
