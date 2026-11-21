@@ -152,8 +152,11 @@ h1, h2 {
   border-radius: var(--lh-r-btn);
   font-size: clamp(13px, 2vw, 16px);
   max-width: 86vw; text-align: center;
+  transition: opacity 400ms var(--lh-ease);
 }
 #hint-bar:empty { display: none; }
+/* Hint sudah lewat 3 detik: memudar (tetap di DOM sampai teks berikutnya). */
+#hint-bar.hint-fade { opacity: 0; }
 
 /* ---------- Touch controls ---------- */
 #touch-controls { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
@@ -172,7 +175,12 @@ h1, h2 {
   width: 64px; height: 64px; border-radius: 50%; border: 2px solid var(--lh-wood);
   background: var(--lh-paper); font-size: 26px; color: var(--lh-bark); min-height: 64px;
   transition: transform var(--lh-t-fast) var(--lh-ease);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
 }
+/* Label kecil di bawah ikon — tombol Lari/Lompat langsung kebaca fungsinya. */
+.round-btn .btn-label { font-size: 11px; font-weight: 800; line-height: 1; letter-spacing: .02em; }
+/* Tahan tombol Lari: menyala emas seperti tombol Aksi. */
+.round-btn.active { background: var(--lh-sun); }
 .round-btn.action {
   width: 76px; height: 76px; background: var(--lh-sun);
   font-size: 15px; font-weight: 800; min-height: 76px; color: var(--lh-ink);
@@ -186,7 +194,7 @@ h1, h2 {
    mengganti node teks (spasi literal di HTML tidak bertahan saat ganti bahasa). */
 .hud-btn .ui-icon, .primary-btn .ui-icon, .modal-panel h2 .ui-icon { margin-right: .3em; }
 .start-panel h1 .ui-icon { width: .85em; height: .85em; margin-right: .1em; }
-.round-btn .ui-icon { width: 28px; height: 28px; }
+.round-btn .ui-icon { width: 26px; height: 26px; }
 #coins-display .ui-icon, #day-display .ui-icon { width: 1.15em; height: 1.15em; }
 #shop-coins .ui-icon { width: 1.15em; height: 1.15em; }
 .char-icon .ui-icon { width: 44px; height: 44px; }

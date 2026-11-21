@@ -3,6 +3,7 @@ export class Input {
   constructor() {
     this.keys = new Set();
     this.joy = { x: 0, y: 0, active: false };
+    this.running = false; // tahan tombol Lari / Shift = sprint 1.6x
     this.onAction = null; // () => void
     this.onJump = null;
     this._joyId = null;
@@ -15,11 +16,15 @@ export class Input {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
       if (e.repeat) return;
       this.keys.add(e.key.toLowerCase());
+      if (e.key === 'Shift') this.running = true;
       if (e.key === ' ' && this.onJump) this.onJump();
       if ((e.key === 'e' || e.key === 'E') && this.onAction) this.onAction();
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
-    window.addEventListener('blur', () => this.keys.clear());
+    window.addEventListener('keyup', (e) => {
+      this.keys.delete(e.key.toLowerCase());
+      if (e.key === 'Shift') this.running = false;
+    });
+    window.addEventListener('blur', () => { this.keys.clear(); this.running = false; });
   }
   // Vektor gerak ternormalisasi: x = kanan, y = maju (diubah main.js ke arah kamera).
   moveVector() {
@@ -65,7 +70,19 @@ export class Input {
   _bindButtons() {
     const act = document.getElementById('btn-action');
     const jmp = document.getElementById('btn-jump');
+    const run = document.getElementById('btn-run');
     if (act) act.addEventListener('click', () => { if (this.onAction) this.onAction(); });
     if (jmp) jmp.addEventListener('click', () => { if (this.onJump) this.onJump(); });
+    // Tombol Lari: TAHAN (bukan klik) — sentuh/mouse down = lari, lepas = jalan.
+    if (run) {
+      const on = (e) => { e.preventDefault(); this.running = true; run.classList.add('active'); };
+      const off = (e) => { if (e) e.preventDefault(); this.running = false; run.classList.remove('active'); };
+      run.addEventListener('touchstart', on, { passive: false });
+      run.addEventListener('touchend', off);
+      run.addEventListener('touchcancel', off);
+      run.addEventListener('mousedown', on);
+      run.addEventListener('mouseleave', off);
+      window.addEventListener('mouseup', off);
+    }
   }
 }

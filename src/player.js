@@ -306,8 +306,8 @@ export class Player {
     if (this.yOff <= 0.01) { this.vy = JUMP_VELOCITY; this.yOff = 0.01; return true; }
     return false;
   }
-  // move: {x, y} di ruang kamera (y = maju). dt detik.
-  update(dt, move, colliders) {
+  // move: {x, y} di ruang kamera (y = maju). dt detik. running = sprint 1.6x.
+  update(dt, move, colliders, running = false) {
     // Kamera menghadap -Z dunia (dari belakang karakter, sedikit dari atas):
     // maju = -Z, kanan = +X.
     const mx = move.x, mz = -move.y;
@@ -317,7 +317,7 @@ export class Player {
       this.vx += mx * ACCEL * dt;
       this.vz += mz * ACCEL * dt;
       const sp = Math.hypot(this.vx, this.vz);
-      const max = MAX_SPEED * (0.4 + 0.6 * mag);
+      const max = MAX_SPEED * (0.4 + 0.6 * mag) * (running ? 1.6 : 1);
       if (sp > max) { this.vx *= max / sp; this.vz *= max / sp; }
       this.facing = Math.atan2(this.vx, this.vz);
     } else {

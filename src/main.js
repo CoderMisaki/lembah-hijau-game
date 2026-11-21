@@ -263,7 +263,7 @@ class Game {
         this.state.minutes = Math.min(DAY_END, this.state.minutes + MIN_PER_SEC * dt);
       }
       const mv = this.input.moveVector();
-      this.player.update(dt, mv, this.world.colliders);
+      this.player.update(dt, mv, this.world.colliders, this.input.running);
       // Peti: dorong bila bersentuhan.
       const crate = this.crate;
       const dx = crate.x - this.player.x, dz = crate.z - this.player.z;

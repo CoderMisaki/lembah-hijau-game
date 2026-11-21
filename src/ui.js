@@ -56,6 +56,8 @@ export class UI {
     // onSound, onQuality, onSave, onLoad, onCustomChange, onAuthSubmit, onOffline, onLogout, onDeleteServerSave
     this.lang = 'id';
     this._toastTimer = null;
+    this._hintTimer = null;
+    this._hintText = '';
     this._authMode = 'login';
     this._custom = defaultCustom('male');
     this._customGender = 'male';
@@ -113,6 +115,7 @@ export class UI {
     applyI18n(lang);
     $('setting-lang').value = lang;
     $('btn-jump').setAttribute('aria-label', t('jump', lang));
+    $('btn-run').setAttribute('aria-label', t('run', lang));
     if (this._customOptionsBuilt) this._renderCustomOptions();
   }
   showGame(isTouch) {
@@ -130,7 +133,22 @@ export class UI {
     clearTimeout(this._toastTimer);
     this._toastTimer = setTimeout(() => e.classList.add('hidden'), ms);
   }
-  setHint(text) { $('hint-bar').textContent = text || ''; }
+  // Hint kontekstual: notifikasi 3 detik saja, lalu memudar. Dipanggil tiap
+  // frame oleh main.js — teks yang SAMA tidak me-reset timer, jadi hint tidak
+  // muncul terus-menerus; teks BARU (mis. habis dekat petak lalu menjauh)
+  // tampil lagi 3 detik. '' = sembunyikan langsung.
+  setHint(text) {
+    const bar = $('hint-bar');
+    const next = text || '';
+    if (next === this._hintText) return;
+    this._hintText = next;
+    clearTimeout(this._hintTimer);
+    if (!next) { bar.classList.add('hidden'); bar.textContent = ''; return; }
+    bar.textContent = next;
+    bar.classList.remove('hidden');
+    bar.classList.remove('hint-fade');
+    this._hintTimer = setTimeout(() => bar.classList.add('hint-fade'), 3000);
+  }
   setActionLabel(text) { $('btn-action').textContent = text || ''; }
   updateHUD(state) {
     this._lastState = state;
