@@ -1,4 +1,19 @@
-// cloud.js — client API backend Lembah Hijau (Cloudflare Workers + D1).
+// cloud.js — client API backend Lembah Hijau (Supabase Edge Function).
+// DRAF untuk migrasi dari Cloudflare Workers + D1. JANGAN timpa
+// src/cloud.js yang lama sebelum migrasi ini lolos verifikasi live.
+// Setelah lolos: ganti src/cloud.js dengan file ini + isi meta
+// lh-supabase-anon-key di index.html (lihat DEPLOY-SUPABASE.md).
+//
+// Perbedaan dari versi Workers (semua perilaku lain IDENTIK):
+//  - Base URL default = Edge Function lembah-hijau-api di project Supabase
+//    (bisa di-override via window.LH_API_BASE atau meta lh-api-base).
+//  - Setiap request WAJIB membawa header `apikey` (anon key) agar gateway
+//    Supabase me-routing request ke Edge Function. Anon key BUKAN secret
+//    (publishable), tapi JANGAN tulis nilainya di repo: isi lewat
+//    window.LH_SUPABASE_ANON_KEY atau <meta name="lh-supabase-anon-key">.
+//  - Token sesi tetap dikirim di `Authorization: Bearer <token>` seperti
+//    sebelumnya; jangan kirim anon key sebagai Authorization.
+//
 // Auth: username + PIN 6 digit. PIN HANYA dikirim saat register/login (HTTPS),
 // TIDAK PERNAH disimpan di perangkat dan TIDAK PERNAH dikirim di request
 // save/load — request itu memakai token sesi acak dari server.
@@ -15,18 +30,32 @@
 export const SESSION_KEY = 'lembahHijauSessionV1';
 export const PENDING_KEY = 'lembahHijauPendingSyncV1';
 export const API_BASE_META = 'lh-api-base';
+export const ANON_KEY_META = 'lh-supabase-anon-key';
+
+// URL default Edge Function (bukan secret — alamat publik project).
+export const DEFAULT_API_BASE = 'https://ajsliyqjucgdtbimvdtd.supabase.co/functions/v1/lembah-hijau-api';
 
 export function getApiBase() {
-  // Urutan: window.LH_API_BASE -> <meta name="lh-api-base"> -> same-origin /api
-  // (Pages + Worker route) -> localhost dev (wrangler dev :8787).
+  // Urutan: window.LH_API_BASE -> <meta name="lh-api-base"> -> Edge Function
+  // default -> localhost dev (supabase functions serve :54321).
   if (typeof window !== 'undefined' && window.LH_API_BASE) return String(window.LH_API_BASE).replace(/\/$/, '');
   const meta = document.querySelector('meta[name="lh-api-base"]');
   const fromMeta = meta ? (meta.getAttribute('content') || '').trim() : '';
   if (fromMeta) return fromMeta.replace(/\/$/, '');
   if (typeof location !== 'undefined' && (location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-    return 'http://localhost:8787';
+    return 'http://localhost:54321/functions/v1/lembah-hijau-api';
   }
-  return ''; // same-origin: Worker di-route ke /api/* di domain game
+  return DEFAULT_API_BASE;
+}
+
+export function getAnonKey() {
+  // Urutan: window.LH_SUPABASE_ANON_KEY -> <meta name="lh-supabase-anon-key">.
+  // Anon key adalah publishable key; nilainya diisi di index.html saat
+  // deploy (dari ~/.config/supabase-lembah-hijau/keys), BUKAN di file ini.
+  if (typeof window !== 'undefined' && window.LH_SUPABASE_ANON_KEY) return String(window.LH_SUPABASE_ANON_KEY).trim();
+  const meta = document.querySelector('meta[name="lh-supabase-anon-key"]');
+  const fromMeta = meta ? (meta.getAttribute('content') || '').trim() : '';
+  return fromMeta;
 }
 
 function apiUrl(path) {
@@ -35,10 +64,12 @@ function apiUrl(path) {
 }
 
 async function fetchJson(path, { method = 'GET', body = null, token = null, timeoutMs = 10000 } = {}) {
+  const anonKey = getAnonKey();
+  if (!anonKey) throw new Error('missing_anon_key');
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const headers = { 'Content-Type': 'application/json' };
+    const headers = { 'Content-Type': 'application/json', 'apikey': anonKey };
     if (token) headers.Authorization = `Bearer ${token}`;
     const res = await fetch(apiUrl(path), {
       method, headers, signal: ctrl.signal,

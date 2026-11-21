@@ -1,0 +1,13 @@
+# Supabase config untuk project lembah-hijau.
+# Dipakai oleh Supabase CLI (supabase link / functions deploy / db push).
+# Deploy via dashboard TIDAK memakai file ini — bila deploy via dashboard,
+# matikan "Verify JWT" secara manual di halaman pembuatan Edge Function
+# (lihat DEPLOY-SUPABASE.md langkah 3).
+
+project_id = "ajsliyqjucgdtbimvdtd"
+
+[functions.lembah-hijau-api]
+# WAJIB false: API ini memakai token sesi sendiri (Bearer), bukan JWT
+# Supabase Auth. Bila true, gateway menolak semua request sebelum sampai
+# ke kode fungsi (401), termasuk register/login.
+verify_jwt = false
