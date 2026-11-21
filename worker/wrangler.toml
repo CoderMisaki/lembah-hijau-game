@@ -1,0 +1,17 @@
+name = "lembah-hijau-api"
+main = "src/index.js"
+compatibility_date = "2026-11-21"
+
+# D1 database — buat dulu (sekali):
+#   npx wrangler d1 create lembah-hijau-db
+# lalu salin database_id yang dikembalikan ke bawah ini.
+[[d1_databases]]
+binding = "DB"
+database_name = "lembah-hijau-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[vars]
+# Origin game yang diizinkan (CORS). Isi dengan domain Pages produksi, mis:
+# ALLOWED_ORIGINS = "https://lembah-hijau.pages.dev"
+# Bila kosong: hanya localhost + *.pages.dev yang diizinkan (mode dev).
+ALLOWED_ORIGINS = ""

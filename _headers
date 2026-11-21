@@ -1,0 +1,11 @@
+# Cloudflare Pages — security headers untuk Lembah Hijau (file statis).
+# Catatan jujur: script-src memakai 'unsafe-inline' karena importmap Three.js
+# WAJIB inline menurut spesifikasi (tidak bisa dimuat dari file eksternal).
+# Game TIDAK PERNAH memasukkan data pemain ke HTML/JS (semua via textContent),
+# jadi permukaan XSS praktis tetap tertutup; ini dicatat di SECURITY CHECKLIST.
+ /*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.workers.dev http://localhost:8787; img-src 'self' data: blob:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(), microphone=(), geolocation=()

@@ -18,6 +18,19 @@ export function attachDebug(game) {
     collectAnimal: (kind) => game.collectAnimal(kind),
     getFps: () => game.fps,
     getState: () => game.getStateSnapshot(),
+    // Revisi: kustomisasi + save/load + orientasi.
+    setCustom: (custom, gender) => game.applyCustom(custom, gender),
+    getCustom: () => JSON.parse(JSON.stringify(game.state.custom)),
+    saveNow: () => game.saveNow(),
+    loadNow: () => game.loadNow(),
+    cloudSync: () => game.cloudSync(),
+    getSessionUser: () => (game.session ? game.session.username : null),
+    isOfflineMode: () => game.offlineMode,
+    checkOrientation: () => {
+      game.checkOrientation();
+      return !document.getElementById('orientation-overlay').classList.contains('hidden');
+    },
+    isPortraitViewport: () => window.innerWidth < window.innerHeight,
   };
   window.__LH = {
     get state() { return game.state; },

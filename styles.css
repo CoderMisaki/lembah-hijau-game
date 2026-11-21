@@ -125,6 +125,42 @@ button { font-family: inherit; cursor: pointer; min-height: 44px; }
   padding: 12px; border-radius: 10px; font-size: 14px; white-space: pre-wrap;
 }
 
+/* ---------- Akun (username + PIN) ---------- */
+#auth-panel { background: rgba(255, 253, 242, .85); border: 2px solid #c9b183; border-radius: 14px;
+  padding: 14px; margin-bottom: 16px; text-align: left; }
+#auth-panel h2 { text-align: center; }
+.auth-label { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  margin-bottom: 8px; font-weight: 700; }
+.auth-label input {
+  padding: 10px 12px; border-radius: 10px; border: 2px solid #8a6b3f; font-size: 16px;
+  background: #fff; min-height: 44px; width: 200px; max-width: 55%;
+}
+.auth-hint { font-size: 12px; color: #7a6547; margin: 0 0 10px; text-align: center; }
+.auth-error { color: #b3261e; font-weight: 700; font-size: 14px; margin: 6px 0 10px; text-align: center; }
+#btn-auth-submit { width: 100%; margin-bottom: 8px; }
+.link-btn { background: none; border: none; color: #2e5d23; font-weight: 700; font-size: 14px;
+  text-decoration: underline; min-height: 44px; width: 100%; }
+.settings-account { font-weight: 700; color: #4a3419; margin-bottom: 12px; }
+
+/* ---------- Kustomisasi karakter ---------- */
+.customize-panel { max-width: 760px; }
+.customize-body { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.custom-preview-wrap { flex: 0 0 300px; margin: 0 auto; text-align: center; }
+#custom-preview { width: 300px; height: 340px; max-width: 78vw; border-radius: 14px;
+  border: 2px solid #c9b183; background: #f6c98a; display: block; }
+.custom-gender { display: flex; gap: 8px; margin-top: 10px; }
+.custom-gender .tab { flex: 1; }
+#custom-options { flex: 1; min-width: 260px; }
+.custom-row { margin-bottom: 12px; }
+.custom-label { font-weight: 800; font-size: 14px; color: #4a3419; margin-bottom: 4px; }
+.custom-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.custom-arrow { min-width: 44px; min-height: 44px; border-radius: 10px; border: 2px solid #8a6b3f;
+  background: #fffdf2; font-size: 20px; font-weight: 800; }
+.custom-model-name { flex: 1; text-align: center; font-weight: 700; }
+.custom-swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+.swatch { width: 32px; height: 32px; min-height: 32px; border-radius: 50%; border: 2px solid rgba(0,0,0,.25); padding: 0; }
+.swatch.selected { border: 3px solid #2e7d32; box-shadow: 0 0 0 2px rgba(46,125,50,.3); }
+
 /* ---------- Small screens / landscape phones ---------- */
 @media (max-width: 700px) {
   #inv-bar { max-width: 52vw; top: auto; bottom: 170px; left: 50%; }

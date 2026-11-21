@@ -6,7 +6,59 @@ Three.js + material + lighting), semua nama dan teks original.
 
 **POV visual:** lembah pastoral low-poly, desa dataran tinggi Indonesia di golden
 hour — SATU lembah, SATU cahaya emas hangat sebagai pemersatu. Palet: hijau lembah,
-tanah coklat hangat, kayu, emas matahari, biru sungai.
+tanah coklat hangat, kayu, emas matahari, biru sungai. Arah visual dikunci:
+`concepts/media-generation-lembah-hijau-lowpoly-0-*.webp` (referensi saja,
+bukan aset runtime — semua aset prosedural dari kode). Bukan realistis, bukan kartun.
+
+## Akun — username + PIN 6 digit (menggantikan guest ID)
+
+Layar awal: **Masuk** atau **Buat Akun** (username 3–16 karakter
+`[a-z0-9_]`, PIN tepat 6 digit angka + konfirmasi). Username dinormalisasi
+ke huruf kecil (case-insensitive, disimpan lowercase). Setelah login, semua
+save (progress + kustomisasi) terikat ke akun itu. Tanpa login, tersedia
+tombol **Main Offline** — progress hanya di perangkat itu sampai login.
+PIN tidak pernah disimpan di perangkat dan tidak pernah dikirim kecuali
+saat register/login (HTTPS). Sesi = token acak server (30 hari), disimpan
+di `localStorage` sebagai `lembahHijauSessionV1`.
+
+Backend: **Cloudflare Workers + D1** (`worker/`). Endpoint: `POST
+/api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`,
+`GET/PUT/DELETE /api/save`, `GET /api/health`. Detail + langkah deploy:
+[`DEPLOY.md`](DEPLOY.md). Status: **belum ter-deploy** (wrangler di VM
+tidak terautentikasi — lihat DEPLOY.md langkah 1–6).
+
+## Kustomisasi karakter (Bima/Sari)
+
+Tombol 🎨 **Kustomisasi** di HUD membuka modal dengan **preview 3D live**
+(karakter berputar, berubah langsung saat opsi diganti). Yang bisa diubah —
+masing-masing punya **model** (varian bentuk) + **warna** (palet):
+
+| Kategori | Model | Warna |
+|---|---|---|
+| Warna kulit | — | 5 tone |
+| Rambut | pendek, spike, panjang, sanggul, kuncir | 5 warna |
+| Atasan | kaos, lengan panjang, overall petani, rompi | 12 warna |
+| Celana | panjang, pendek, rok | 12 warna |
+| Topi | tanpa topi, jerami, cap, kupluk, bandana | 12 warna |
+| Kacamata | tanpa, bulat, kotak, hitam | 4 warna frame |
+| Sepatu | bot, sneakers, sandal | 12 warna |
+
+Kustomisasi tersimpan bersama save (lokal + server) — tidak perlu buat
+ulang tiap buka game.
+
+## Save / Load + sinkronisasi
+
+- Tombol 💾 **Simpan** / 📂 **Muat** di HUD + autosave tiap 10 detik.
+- **localStorage** (`lembahHijauSaveV1`, format v2) = cache/fallback offline.
+- **Backend (D1)** = sumber kebenaran saat online.
+- **Aturan sinkronisasi:** saat login/mulai — server lebih baru
+  (`updatedAt` lebih besar) → pakai server; lokal lebih baru (main offline)
+  → upload lokal; `updatedAt` sama → server menang. Tombol Muat manual:
+  server SELALU menang. Gagal jaringan saat save → tandai pending
+  (`lembahHijauPendingSyncV1`), coba lagi di save berikut / saat `online`.
+  Progress lokal tidak pernah hilang karena offline.
+- Server memvalidasi ulang SEMUA field save (tipe, rentang, allowlist,
+  maks 64 KB); field tak dikenal dibuang, bukan disimpan mentah.
 
 ## Cara menjalankan (lokal)
 
@@ -49,14 +101,26 @@ Tidak ada import dari CDN lain.
 4. **Ternak:** kandang berpagar berisi 3 Ayam + 2 Sapi. Beri makan (1 pakan dari toko, atau potong 2 koin langsung bila pakan habis); yang diberi makan menghasilkan keesokan paginya: Ayam → Telur (jual 8), Sapi → Susu (jual 15). Ambil hasil lewat aksi di dekat hewan / koleksi via API.
 5. **Ekonomi:** koin (mulai 50), toko benih + pakan (tab Beli), jual hasil panen + ternak (tab Jual).
 6. **Waktu:** 1 hari = ~4 menit nyata (06:00–22:00, mentok di 22:00 sampai tidur). Tidur di rumah → hari berikut, tanaman tumbuh, ternak berproduksi. Malam gelap + lampu teras rumah menyala.
-7. **Simpan otomatis:** localStorage tiap 10 detik + tiap aksi penting; progress dimuat saat buka; "Hapus save" di Pengaturan.
+7. **Simpan otomatis:** localStorage tiap 10 detik + tiap aksi penting;
+   sinkron ke backend (bila login + online); progress dimuat saat buka;
+   "Hapus Save" di Pengaturan (menghapus lokal + server bila login).
 8. **Pengaturan:** bahasa ID/EN (semua teks UI dua bahasa, tersimpan), ganti karakter, suara on/off, kualitas grafis Rendah/Sedang/Tinggi.
-9. **Suara:** WebAudio sederhana (tanam, panen, koin, hewan, cangkul, siram, lompat, tidur); try/catch, mulai setelah gestur pengguna.
+9. **Akun + kustomisasi:** lihat bagian atas README (username + PIN,
+   preview 3D live, 7 kategori model + warna, save terikat akun).
+10. **Suara:** WebAudio sederhana (tanam, panen, koin, hewan, cangkul, siram, lompat, tidur); try/catch, mulai setelah gestur pengguna.
 
 ## Orientasi & responsif
 
 - Gameplay mode **landscape**. Dunia + HUD dirancang untuk layar lebar.
 - Mobile: saat game dimulai, otomatis minta fullscreen + `screen.orientation.lock('landscape')` (Android Chrome). Semua error ditangkap — lock gagal tidak crash.
+- **Perbaikan orientasi (revisi):** overlay TIDAK mengandalkan hasil promise
+  `lock()` — lock bisa resolve tanpa rotasi nyata (headless) atau menggantung
+  tanpa settle. `startGame()` menjadwalkan re-check orientasi AKTUAL
+  (innerWidth<innerHeight / `screen.orientation.type`) segera + ~500 ms
+  kemudian; janji fullscreen/lock dibatasi timeout 1 detik. Overlay muncul
+  bila viewport benar-benar masih portrait (perangkat sentuh).
+- Kamera pembuka: spawn (6,20) + kamera intro tinggi/jauh ~4 detik pertama
+  sehingga frame awal memuat petak kebun + sungai + pegunungan.
 - iOS Safari tidak mendukung orientation lock → fallback: bila perangkat touch dalam portrait, tampilkan overlay **"Putar perangkat Anda ke landscape"** (dwibahasa) sampai orientasi jadi landscape. Game tidak dimainkan dalam portrait.
 - Desktop: tidak ada paksaan orientasi; layout menyesuaikan ukuran jendela.
 - Canvas resize mengikuti viewport; HUD/joystick/tombol/modal menyesuaikan ukuran layar.
@@ -92,6 +156,10 @@ api.addCoins(n)                 // tambah koin (uji)
 api.setLang('id' | 'en')
 api.getFps()                    // FPS rata-rata terakhir
 api.getState()                  // snapshot state (koin, hari, jam, inv, petak, hewan, pemain)
+api.setCustom(custom, gender)   // terapkan kustomisasi (model + warna)
+api.getCustom()                 // kustomisasi aktif
+api.saveNow() / api.loadNow()   // simpan / muat manual (cloud bila login)
+api.checkOrientation()          // true bila overlay portrait tampil
 ```
 
 Contoh loop penuh (wortel):
@@ -119,14 +187,36 @@ Properti baca: `window.__LH.state`, `.player`, `.farm`, `.animals`,
 
 ## Kekurangan yang diketahui (Stage 1)
 
+- Backend (Workers + D1) **belum ter-deploy** — wrangler di VM tidak
+  terautentikasi; langkah deploy persis ada di `DEPLOY.md`. Sampai deploy,
+  save cloud tidak aktif dan game memakai localStorage + mode offline.
 - Kamera sudut tetap (belakang-atas); belum ada rotasi kamera manual.
 - Hewan tidak bisa dibeli/dijual; jumlah ternak tetap (3 ayam + 2 sapi).
 - Satu jenis pakan untuk semua hewan; tidak ada sistem lapar/animasi makan khusus.
 - Jalan tanah hanya pewarnaan vertex terrain (bukan mesh jalan terpisah).
 - Belum ada musik latar (hanya efek suara); belum ada cuaca.
-- Verifikasi browser penuh (headless) belum dilakukan di VM ini bila tidak ada
-  Chromium — lihat laporan build untuk hasil self-check yang sebenarnya.
 - Di chrome-headless-shell VM (software rendering tanpa GPU), game hanya berjalan
   ~3 fps sehingga waktu game melambat (dt di-clamp 0,05 dtk) — ini artefak
   headless, bukan patokan perangkat nyata; `api.getFps()` mengukur waktu dinding
   nyata sehingga tetap jujur.
+- Multi-device conflict: bila dua perangkat mengubah save yang sama secara
+  offline lalu keduanya online, yang menang adalah `updatedAt` terbaru
+  (tie → server). Tidak ada merge per-field.
+- PIN hanya bisa diganti dengan hapus akun (endpoint ganti PIN belum ada);
+  tidak ada pemulihan akun bila PIN lupa (by design Stage 1 — tanpa email).
+
+## Security checklist (revisi — hasil pengecekan)
+
+| Cek | Hasil |
+|---|---|
+| PIN tidak pernah plaintext | ✅ PBKDF2-HMAC-SHA256, 120.000 iterasi, salt acak 16 B/user; teruji: PIN sama → hash beda per user |
+| PIN tidak di log/respons | ✅ 0 kemunculan PIN di log Worker live; respons auth hanya berisi token+username+expiresAt |
+| Token sesi | ✅ acak 32 B, disimpan sebagai hash SHA-256 di DB, kedaluwarsa 30 hari; logout mematikan token (teruji) |
+| Rate limit + lockout login | ✅ 5 gagal/15 mnt per username → kunci 15 mnt; pesan gagal generik (anti enumerasi username); teruji live 5x salah → 429, PIN benar saat terkunci tetap 429 |
+| Validasi server | ✅ semua field save divalidasi (tipe/rentang/allowlist/64 KB); field ekstra dibuang; teruji: coins berlebih, custom di luar allowlist, plots ≠24, username ≠ sesi → 400 |
+| SQL injection | ✅ semua query prepared statements + parameter binding (tidak ada string interpolation SQL) |
+| CORS | ✅ hanya origin game (env `ALLOWED_ORIGINS`; default localhost + `*.pages.dev`); origin asing → 403 (teruji) |
+| Tanpa secret di frontend | ✅ tidak ada token/API key di kode client; PIN hanya di input form saat auth |
+| Tanpa eval / innerHTML data pemain | ✅ tidak ada `eval`; username hanya via `textContent`; toko/inventaris dibangun via DOM API |
+| CSP | ⚠️ ada di `_headers` (Pages), tapi `script-src` memakai `'unsafe-inline'` karena importmap Three.js wajib inline — dicatat jujur, bukan diklaim ketat penuh |
+| **Belum dicek** | ❌ audit/pen-test penuh (termasuk fuzzing endpoint + uji bypass CORS/CSRF di browser nyata); uji beban rate limit dari banyak IP/isolate bersamaan (rate limit D1-backed, tapi belum diuji beban); pemulihan akun / ganti PIN belum ada |

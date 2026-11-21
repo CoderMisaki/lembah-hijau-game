@@ -9,10 +9,17 @@ import { Animals, ANIMAL_DEFS } from './animals.js';
 import { UI } from './ui.js';
 import { t } from './i18n.js';
 import { Sfx } from './audio.js';
-import { saveGame, loadGame, clearSave } from './save.js';
+import { saveGame, loadGame, clearSave, buildSaveData } from './save.js';
 import { Input } from './input.js';
 import { DynamicBox, terrainHeight } from './physics.js';
 import { attachDebug } from './debug.js';
+import { defaultCustom, sanitizeCustom } from './customization.js';
+import {
+  getSession, setSession, clearSession, hasPending, markPending, clearPending,
+  validateUsername, validatePin, normalizeUsername,
+  register as cloudRegister, login as cloudLogin, logout as cloudLogout,
+  cloudGetSave, cloudPutSave, cloudDeleteSave, cloudHealth,
+} from './cloud.js';
 
 const DAY_START = 360;   // 06:00
 const DAY_END = 1320;    // 22:00
@@ -38,9 +45,12 @@ function defaultState() {
   return {
     coins: 50, day: 1, minutes: DAY_START,
     lang: 'id', gender: 'male', sound: true, quality: 'medium',
+    custom: defaultCustom('male'),
+    username: null, updatedAt: 0,
     inv: { carrotSeed: 0, tomatoSeed: 0, pumpkinSeed: 0, feed: 0,
            carrot: 0, tomato: 0, pumpkin: 0, egg: 0, milk: 0 },
-    plots, animals, playerX: 0, playerZ: 0,
+    plots, animals, playerX: 6, playerZ: 20, // spawn pembuka: selatan kebun/kandang,
+    // kamera awal membingkai petak kebun (timur) + kandang (barat) + sungai + pegunungan (utara)
   };
 }
 
@@ -53,13 +63,22 @@ class Game {
         coins: saved.coins ?? 50, day: saved.day ?? 1, minutes: saved.minutes ?? DAY_START,
         lang: saved.lang || 'id', gender: saved.gender || 'male',
         sound: saved.sound !== false, quality: saved.quality || 'medium',
+        custom: sanitizeCustom(saved.custom, saved.gender || 'male'),
+        username: saved.username || null, updatedAt: saved.updatedAt || saved.savedAt || 0,
         inv: { ...this.state.inv, ...(saved.inv || {}) },
-        playerX: saved.player?.x ?? 0, playerZ: saved.player?.z ?? 0,
+        playerX: saved.player?.x ?? 6, playerZ: saved.player?.z ?? 20,
       });
       if (Array.isArray(saved.plots) && saved.plots.length === this.state.plots.length) this.state.plots = saved.plots;
       if (Array.isArray(saved.animals) && saved.animals.length === this.state.animals.length) this.state.animals = saved.animals;
       this._hadSave = true;
     }
+    // Sesi akun (token saja; PIN tidak pernah disimpan).
+    this.session = getSession();
+    if (this.session) this.state.username = this.session.username;
+    this.offlineMode = false; // "Main Offline" eksplisit dari layar awal
+    this._cloudBusy = false;
+    this._cloudTimer = null;
+    this._introUntil = 0;
     this.fps = 60;
     this.started = false;
     this._fpsAccum = 0; this._fpsFrames = 0; this._lowFpsTime = 0; this._lastDegrade = 0;
@@ -80,10 +99,12 @@ class Game {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xf6c98a);
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 400);
-    this.camera.position.set(0, 8, 12);
+    // Posisi awal: tinggi + jauh ke selatan agar frame pembuka memuat kebun,
+    // sungai (barat), dan pegunungan (utara) — bukan hamparan rumput kosong.
+    this.camera.position.set(6, 16, 42);
 
     this.world = buildWorld(this.scene);
-    this.player = new Player(this.scene, this.state.gender, this.state.playerX, this.state.playerZ);
+    this.player = new Player(this.scene, this.state.gender, this.state.playerX, this.state.playerZ, this.state.custom);
     this.farm = new Farm(this.scene, this.state.plots);
     this.animals = new Animals(this.scene, this.state.animals);
     this.crate = new DynamicBox(7, -15);
@@ -97,17 +118,28 @@ class Game {
       onSell: (k, p, n) => this.sellItem(k, p, n),
       onPlant: (crop) => this.plantChosen(crop),
       onSleepYes: () => { this.ui.closeSleep(); this.sleep(); },
-      onClearSave: () => { clearSave(); this.ui.toast(t('saveCleared', this.state.lang)); setTimeout(() => location.reload(), 900); },
+      onClearSave: () => this.clearAllSave(),
       onLang: (lang) => this.setLang(lang),
       onGender: (g) => { this.state.gender = g; this.player.setGender(this.scene, g); this.save(); },
       onSound: (on) => { this.state.sound = on; this.sfx.enabled = on; this.save(); },
       onQuality: (q) => this.applyQuality(q),
+      onSave: () => this.saveNow(),
+      onLoad: () => this.loadNow(),
+      onCustomChange: (custom, gender) => this.applyCustom(custom, gender),
+      onAuthSubmit: (mode, u, pin, pinConfirm) => this.handleAuth(mode, u, pin, pinConfirm),
+      onOffline: () => this.enterOfflineMode(),
+      onLogout: () => this.handleLogout(),
+      onDeleteServerSave: () => this.deleteServerSave(),
     });
     this.ui.setLang(this.state.lang);
+    this.ui.setAuthState(this.session ? this.session.username : null);
     this.ui.showStart(this._hadSave
       ? t('welcomeBack', this.state.lang, { d: this.state.day }) : '');
     this.ui.updateHUD(this.state);
     this.applyQuality(this.state.quality);
+    // Sinkronisasi awal (non-blocking): bila ada sesi, samakan save lokal/server.
+    if (this.session) this.syncFromCloudOnBoot();
+    window.addEventListener('online', () => { if (hasPending() && this.session) this.cloudSync(); });
 
     window.addEventListener('resize', () => this.onResize());
     window.addEventListener('orientationchange', () => setTimeout(() => this.checkOrientation(), 300));
@@ -120,31 +152,58 @@ class Game {
 
   // ---------- Siklus hidup ----------
   async startGame() {
+    // Wajib login ATAU mode offline eksplisit — tidak ada jalan pintas diam-diam.
+    if (!this.session && !this.offlineMode) {
+      this.ui.toast(t('needLogin', this.state.lang));
+      return;
+    }
     this.sfx.ensure();
     this.sfx.play('click');
     this.started = true;
     this.ui.showGame(this._isTouch);
     this.ui.updateHUD(this.state);
-    // Landscape: fullscreen + orientation lock (Android Chrome). Semua error ditangkap.
+    // Kamera pembuka: frame lebar (kebun + sungai + pegunungan) selama ~4 detik.
+    this._introUntil = performance.now() + 4000;
+    const px = this.player.x, py = this.player.y, pz = this.player.z;
+    this.camera.position.set(px - 2, py + 15, pz + 22);
+    // PERBAIKAN 5a (lanjutan): re-check orientasi AKTUAL dijadwalkan DULUAN —
+    // JANGAN bergantung pada promise fullscreen/lock: keduanya bisa resolve
+    // tanpa rotasi nyata (headless) ATAU menggantung tanpa pernah settle,
+    // yang akan menunda/membatalkan pengecekan bila dijadwalkan setelahnya.
+    this.checkOrientation();
+    setTimeout(() => this.checkOrientation(), 500);
+    // Landscape: fullscreen + orientation lock (Android Chrome). Semua error
+    // ditangkap; tiap janji dibatasi 1 detik agar janji yang menggantung tidak
+    // menghentikan startGame.
+    const timeoutVal = Symbol('timeout');
+    const withTimeout = (p, ms) => Promise.race([
+      Promise.resolve(p),
+      new Promise((resolve) => setTimeout(() => resolve(timeoutVal), ms)),
+    ]);
     try {
       if (this._isTouch && document.documentElement.requestFullscreen) {
-        await document.documentElement.requestFullscreen().catch(() => {});
+        await withTimeout(document.documentElement.requestFullscreen().catch(() => {}), 1000);
       }
     } catch (e) { /* abaikan */ }
     try {
       if (this._isTouch && screen.orientation && screen.orientation.lock) {
-        await screen.orientation.lock('landscape');
-        this._orientationLocked = true;
+        const r = await withTimeout(screen.orientation.lock('landscape'), 1000);
+        this._orientationLocked = r !== timeoutVal;
       }
     } catch (e) { this._orientationLocked = false; /* iOS / tidak didukung -> fallback overlay */ }
     this.checkOrientation();
     this.save();
+    if (this.session && hasPending()) this.cloudSync();
   }
   checkOrientation() {
-    // Desktop: jangan paksa apa pun. Mobile portrait + lock gagal -> overlay.
+    // Desktop: jangan paksa apa pun. Perangkat sentuh: overlay bila viewport
+    // BENAR-BENAR masih portrait (innerWidth < innerHeight / orientation type),
+    // terlepas dari apakah lock() resolve atau tidak.
     if (!this.started || !this._isTouch) { this.ui.setOrientationOverlay(false); return; }
-    const portrait = window.innerHeight > window.innerWidth;
-    this.ui.setOrientationOverlay(portrait && !this._orientationLocked);
+    const portrait = window.innerWidth < window.innerHeight
+      || (screen.orientation && typeof screen.orientation.type === 'string'
+        && screen.orientation.type.startsWith('portrait'));
+    this.ui.setOrientationOverlay(portrait);
   }
   onResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -220,10 +279,17 @@ class Game {
       this.ui.updateHUD(this.state);
     }
     this.world.update(dt, this.state.minutes);
-    // Kamera third-person: smooth follow dari belakang-atas.
+    // Kamera third-person: smooth follow dari belakang-atas. Selama intro
+    // (~4 detik pertama), kamera lebih tinggi + jauh agar kebun, sungai, dan
+    // pegunungan masuk frame pembuka.
     const px = this.player.x, py = this.player.y, pz = this.player.z;
-    const camTarget = new THREE.Vector3(px, py + 1.6, pz);
-    const desired = new THREE.Vector3(px, py + 7.5, pz + 11);
+    const intro = performance.now() < this._introUntil;
+    const camTarget = intro
+      ? new THREE.Vector3(px - 3, py + 3, pz - 10)
+      : new THREE.Vector3(px, py + 1.6, pz);
+    const desired = intro
+      ? new THREE.Vector3(px - 2, py + 13, pz + 20)
+      : new THREE.Vector3(px, py + 7.5, pz + 11);
     this.camera.position.lerp(desired, 1 - Math.pow(0.001, dt));
     this.camera.lookAt(camTarget);
     this.renderer.render(this.scene, this.camera);
@@ -324,6 +390,208 @@ class Game {
     return false;
   }
 
+  // ---------- Akun + sinkronisasi cloud ----------
+  // Aturan sinkronisasi (lengkap di README):
+  //  - localStorage = cache/fallback offline; backend = sumber kebenaran.
+  //  - Boot/login: server lebih baru -> pakai server; lokal lebih baru (main
+  //    offline) -> upload lokal; updatedAt sama -> server menang.
+  //  - Tombol Muat manual: server SELALU menang.
+  //  - Gagal jaringan -> tandai pending, coba lagi di save berikut / online.
+  applySaveData(d) {
+    if (!d) return false;
+    const lang = this.state.lang;
+    this.state.coins = d.coins ?? this.state.coins;
+    this.state.day = d.day ?? this.state.day;
+    this.state.minutes = d.minutes ?? this.state.minutes;
+    this.state.lang = d.lang || this.state.lang;
+    this.state.gender = d.gender || this.state.gender;
+    this.state.sound = d.sound !== false;
+    this.state.quality = d.quality || this.state.quality;
+    this.state.custom = sanitizeCustom(d.custom, this.state.gender);
+    this.state.username = d.username || this.state.username;
+    this.state.updatedAt = d.updatedAt || d.savedAt || 0;
+    this.state.inv = { ...this.state.inv, ...(d.inv || {}) };
+    if (Array.isArray(d.plots) && d.plots.length === this.state.plots.length) {
+      this.state.plots.splice(0, this.state.plots.length, ...d.plots);
+      this.farm.refreshAll();
+    }
+    if (Array.isArray(d.animals) && d.animals.length === this.state.animals.length) {
+      this.state.animals.splice(0, this.state.animals.length, ...d.animals);
+    }
+    if (d.player) this.player.teleport(d.player.x ?? 6, d.player.z ?? 20);
+    if (this.player.gender !== this.state.gender) this.player.setGender(this.scene, this.state.gender);
+    this.player.applyCustomization(this.scene, this.state.custom);
+    this.sfx.enabled = this.state.sound;
+    this.applyQuality(this.state.quality);
+    this.ui.setLang(this.state.lang);
+    this.ui.updateHUD(this.state);
+    this.save();
+    void lang;
+    return true;
+  }
+
+  async syncFromCloudOnBoot() {
+    try {
+      const res = await cloudGetSave();
+      if (!res || !res.save) {
+        // Akun baru / belum ada save server: unggah save lokal bila ada progress.
+        if (this._hadSave) await this.cloudSync();
+        return;
+      }
+      const remoteAt = res.save.updatedAt || res.save.savedAt || res.updatedAt || 0;
+      const localAt = this.state.updatedAt || 0;
+      if (remoteAt > localAt) {
+        this.applySaveData(res.save);
+        this.ui.toast(t('serverNewer', this.state.lang));
+      } else if (localAt > remoteAt) {
+        await this.cloudSync();
+        this.ui.toast(t('localUploaded', this.state.lang));
+      }
+      // Sama -> server menang, tapi isinya identik jadi tidak ada yang diubah.
+    } catch (e) {
+      // Offline / server belum deploy: lanjut dengan save lokal, tandai pending.
+      markPending();
+    }
+  }
+
+  scheduleCloudSync() {
+    if (!this.session) return;
+    clearTimeout(this._cloudTimer);
+    this._cloudTimer = setTimeout(() => this.cloudSync(), 1500);
+  }
+
+  async cloudSync() {
+    if (!this.session || this._cloudBusy) return false;
+    this._cloudBusy = true;
+    try {
+      const data = buildSaveData({ ...this.state, playerX: this.player.x, playerZ: this.player.z });
+      await cloudPutSave(data);
+      this.state.updatedAt = data.updatedAt;
+      clearPending();
+      return true;
+    } catch (e) {
+      markPending();
+      return false;
+    } finally {
+      this._cloudBusy = false;
+    }
+  }
+
+  async saveNow() {
+    this.save();
+    if (!this.session) {
+      this.ui.toast(t(this.offlineMode ? 'savedLocal' : 'needLogin', this.state.lang));
+      return;
+    }
+    const ok = await this.cloudSync();
+    this.ui.toast(t(ok ? 'savedCloud' : 'savedLocal', this.state.lang));
+  }
+
+  async loadNow() {
+    if (!this.session) {
+      this.ui.toast(t('needLogin', this.state.lang));
+      return;
+    }
+    try {
+      const res = await cloudGetSave();
+      if (!res || !res.save) {
+        this.ui.toast(t('noServerSave', this.state.lang));
+        return;
+      }
+      this.applySaveData(res.save);
+      this.ui.toast(t('loadedCloud', this.state.lang));
+    } catch (e) {
+      this.ui.toast(t('loadFailed', this.state.lang));
+    }
+  }
+
+  async deleteServerSave() {
+    if (!this.session) {
+      this.ui.toast(t('needLogin', this.state.lang));
+      return;
+    }
+    try {
+      await cloudDeleteSave();
+      this.ui.toast(t('serverSaveDeleted', this.state.lang));
+    } catch (e) {
+      this.ui.toast(t('loadFailed', this.state.lang));
+    }
+  }
+
+  clearAllSave() {
+    const doReload = () => {
+      this.ui.toast(t('saveCleared', this.state.lang));
+      setTimeout(() => location.reload(), 900);
+    };
+    clearSave();
+    clearPending();
+    if (this.session) {
+      cloudDeleteSave().catch(() => {}).finally(doReload);
+    } else doReload();
+  }
+
+  applyCustom(custom, gender) {
+    if (gender && gender !== this.state.gender) {
+      this.state.gender = gender;
+      this.player.setGender(this.scene, gender);
+    }
+    this.state.custom = sanitizeCustom(custom, this.state.gender);
+    this.player.applyCustomization(this.scene, this.state.custom);
+    this.save();
+  }
+
+  enterOfflineMode() {
+    this.offlineMode = true;
+    this.ui.setAuthState(null);
+    this.ui.showStart(t('offlineNote', this.state.lang));
+    this.ui.toast(t('offlineNote', this.state.lang));
+  }
+
+  async handleAuth(mode, username, pin, pinConfirm) {
+    const lang = this.state.lang;
+    this.ui.setAuthError('');
+    const u = normalizeUsername(username);
+    if (!validateUsername(u)) { this.ui.setAuthError(t('invalidUsername', lang)); return; }
+    if (!validatePin(pin)) { this.ui.setAuthError(t('invalidPin', lang)); return; }
+    if (mode === 'register' && pin !== pinConfirm) {
+      this.ui.setAuthError(t('pinMismatch', lang));
+      return;
+    }
+    this.ui.setAuthBusy(true);
+    try {
+      // PIN hanya dikirim di request ini (HTTPS); tidak pernah disimpan/di-log.
+      const res = mode === 'register' ? await cloudRegister(u, pin) : await cloudLogin(u, pin);
+      this.session = getSession() || res;
+      if (res && res.token) setSession(res);
+      this.state.username = u;
+      this.offlineMode = false;
+      this.ui.setAuthState(u);
+      this.ui.toast(t(mode === 'register' ? 'registerOk' : 'loginOk', lang, { u }));
+      // Samakan save lokal/server untuk akun ini.
+      await this.syncFromCloudOnBoot();
+      this.save();
+    } catch (e) {
+      const status = e && e.status;
+      if (status === 409) this.ui.setAuthError(t('usernameTaken', lang));
+      else if (status === 429) this.ui.setAuthError(t('lockedOut', lang));
+      else if (status === 401) this.ui.setAuthError(t('loginFailed', lang));
+      else if (e && e.message === 'invalid_username') this.ui.setAuthError(t('invalidUsername', lang));
+      else if (e && e.message === 'invalid_pin') this.ui.setAuthError(t('invalidPin', lang));
+      else this.ui.setAuthError((e && e.message) || t('loginFailed', lang));
+    } finally {
+      this.ui.setAuthBusy(false);
+    }
+  }
+
+  async handleLogout() {
+    this.save();
+    try { await cloudLogout(); } catch (e) { /* abaikan */ }
+    clearSession();
+    this.session = null;
+    this.state.username = null;
+    setTimeout(() => location.reload(), 300);
+  }
+
   // ---------- API inti (dipakai UI + hook uji window.__LH.api) ----------
   hoeAt(ix, iz) { const ok = this.farm.hoeAt(ix, iz); if (ok) this.save(); return ok; }
   plantAt(ix, iz, crop) { const ok = this.farm.plantAt(ix, iz, crop, this.state.inv); if (ok) this.save(); return ok; }
@@ -415,7 +683,9 @@ class Game {
     return JSON.parse(JSON.stringify({
       coins: this.state.coins, day: this.state.day, minutes: this.state.minutes,
       lang: this.state.lang, gender: this.state.gender, sound: this.state.sound,
-      quality: this.state.quality, inv: this.state.inv,
+      quality: this.state.quality, custom: this.state.custom,
+      username: this.state.username, updatedAt: this.state.updatedAt,
+      inv: this.state.inv,
       plots: this.state.plots,
       animals: this.state.animals,
       player: { x: this.player.x, z: this.player.z, y: this.player.y },
@@ -425,6 +695,7 @@ class Game {
     this.state.playerX = this.player.x;
     this.state.playerZ = this.player.z;
     saveGame(this.state);
+    this.scheduleCloudSync();
   }
 }
 

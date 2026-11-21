@@ -1,28 +1,63 @@
-// ui.js — HUD, dialog, toko, pengaturan, toast, overlay orientasi.
-// Semua teks lewat i18n (ID/EN); UI tidak menyimpan logika game.
+// ui.js — HUD, dialog, toko, pengaturan, toast, overlay orientasi, akun,
+// kustomisasi karakter (preview 3D live). Semua teks lewat i18n (ID/EN).
+// Keamanan: data pemain (username dll.) HANYA via textContent — tidak ada
+// innerHTML dari data pemain di mana pun di file ini.
+import * as THREE from 'three';
 import { t, applyI18n } from './i18n.js';
 import { CROPS } from './farm.js';
 import { ANIMAL_DEFS } from './animals.js';
+import { buildCharacter } from './player.js';
+import {
+  SKIN_TONES, HAIR_STYLES, HAIR_COLORS, SHIRT_MODELS, PANTS_MODELS,
+  HAT_MODELS, GLASSES_MODELS, SHOES_MODELS, PALETTE, FRAME_COLORS,
+  defaultCustom, sanitizeCustom,
+} from './customization.js';
 
 const $ = (id) => document.getElementById(id);
 
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+// Definisi baris kustomisasi: [kunci model, daftar model, kunci warna, daftar warna, kunci i18n label]
+const CUSTOM_ROWS = [
+  { label: 'skin', modelKey: null, models: SKIN_TONES, colorKey: 'skin', colors: SKIN_TONES },
+  { label: 'hairStyle', modelKey: 'hairStyle', models: HAIR_STYLES, colorKey: 'hairColor', colors: HAIR_COLORS },
+  { label: 'shirtModel', modelKey: 'shirtModel', models: SHIRT_MODELS, colorKey: 'shirtColor', colors: PALETTE },
+  { label: 'pantsModel', modelKey: 'pantsModel', models: PANTS_MODELS, colorKey: 'pantsColor', colors: PALETTE },
+  { label: 'hatModel', modelKey: 'hatModel', models: HAT_MODELS, colorKey: 'hatColor', colors: PALETTE },
+  { label: 'glassesModel', modelKey: 'glassesModel', models: GLASSES_MODELS, colorKey: 'glassesColor', colors: FRAME_COLORS },
+  { label: 'shoesModel', modelKey: 'shoesModel', models: SHOES_MODELS, colorKey: 'shoesColor', colors: PALETTE },
+];
+
 export class UI {
   constructor(handlers) {
-    this.h = handlers; // {onStart, onBuy, onSell, onPlant, onSleepYes, onClearSave, onLang, onGender, onSound, onQuality}
+    this.h = handlers; // onStart, onBuy, onSell, onPlant, onSleepYes, onClearSave, onLang, onGender,
+    // onSound, onQuality, onSave, onLoad, onCustomChange, onAuthSubmit, onOffline, onLogout, onDeleteServerSave
     this.lang = 'id';
     this._toastTimer = null;
+    this._authMode = 'login';
+    this._custom = defaultCustom('male');
+    this._customGender = 'male';
+    this._preview = null; // {renderer, scene, camera, group, raf}
     this._bind();
   }
   _bind() {
     $('btn-start').addEventListener('click', () => this.h.onStart());
-    document.querySelectorAll('.char-card').forEach((el) => {
-      el.addEventListener('click', () => {
+    document.querySelectorAll('.char-card').forEach((el2) => {
+      el2.addEventListener('click', () => {
         document.querySelectorAll('.char-card').forEach((c) => c.classList.remove('selected'));
-        el.classList.add('selected');
-        this.h.onGender(el.dataset.gender);
+        el2.classList.add('selected');
+        this.h.onGender(el2.dataset.gender);
       });
     });
     $('btn-shop').addEventListener('click', () => { this.openShop('buy'); });
+    $('btn-save').addEventListener('click', () => this.h.onSave());
+    $('btn-load').addEventListener('click', () => this.h.onLoad());
+    $('btn-customize').addEventListener('click', () => this.openCustomize());
     $('btn-close-shop').addEventListener('click', () => this.closeShop());
     $('tab-buy').addEventListener('click', () => this.openShop('buy'));
     $('tab-sell').addEventListener('click', () => this.openShop('sell'));
@@ -32,58 +67,239 @@ export class UI {
     $('btn-settings').addEventListener('click', () => this.openSettings());
     $('btn-close-settings').addEventListener('click', () => this.closeSettings());
     $('btn-clear-save').addEventListener('click', () => this.h.onClearSave());
+    $('btn-delete-server-save').addEventListener('click', () => this.h.onDeleteServerSave());
     $('setting-lang').addEventListener('change', (e) => this.h.onLang(e.target.value));
     $('setting-gender').addEventListener('change', (e) => this.h.onGender(e.target.value));
     $('setting-sound').addEventListener('change', (e) => this.h.onSound(e.target.value === 'on'));
     $('setting-quality').addEventListener('change', (e) => this.h.onQuality(e.target.value));
+    // ---- Akun ----
+    $('tab-login').addEventListener('click', () => this.setAuthMode('login'));
+    $('tab-register').addEventListener('click', () => this.setAuthMode('register'));
+    $('btn-auth-submit').addEventListener('click', () => this._submitAuth());
+    $('auth-pin').addEventListener('keydown', (e) => { if (e.key === 'Enter') this._submitAuth(); });
+    $('auth-pin-confirm').addEventListener('keydown', (e) => { if (e.key === 'Enter') this._submitAuth(); });
+    $('btn-offline').addEventListener('click', () => this.h.onOffline());
+    $('btn-logout').addEventListener('click', () => this.h.onLogout());
+    // ---- Kustomisasi ----
+    $('btn-close-customize').addEventListener('click', () => this.closeCustomize());
+    $('btn-custom-reset').addEventListener('click', () => {
+      this._custom = defaultCustom(this._customGender);
+      this._renderCustomOptions();
+      this._rebuildPreview();
+      this.h.onCustomChange({ ...this._custom }, this._customGender);
+    });
+    $('custom-male').addEventListener('click', () => this._setCustomGender('male'));
+    $('custom-female').addEventListener('click', () => this._setCustomGender('female'));
   }
   setLang(lang) {
     this.lang = lang;
     applyI18n(lang);
     $('setting-lang').value = lang;
+    if (this._customOptionsBuilt) this._renderCustomOptions();
   }
   showGame(isTouch) {
     $('start-screen').classList.add('hidden');
     $('hud').classList.remove('hidden');
-    // Joystick + tombol aksi hanya untuk perangkat sentuh; desktop pakai keyboard.
     if (isTouch) $('touch-controls').classList.remove('hidden');
   }
   showStart(saveNote) {
     $('save-note').textContent = saveNote || '';
   }
   toast(msg, ms = 2600) {
-    const el = $('toast');
-    el.textContent = msg;
-    el.classList.remove('hidden');
+    const e = $('toast');
+    e.textContent = msg;
+    e.classList.remove('hidden');
     clearTimeout(this._toastTimer);
-    this._toastTimer = setTimeout(() => el.classList.add('hidden'), ms);
+    this._toastTimer = setTimeout(() => e.classList.add('hidden'), ms);
   }
   setHint(text) { $('hint-bar').textContent = text || ''; }
   setActionLabel(text) { $('btn-action').textContent = text || '✋'; }
   updateHUD(state) {
+    this._lastState = state;
     $('coins').textContent = state.coins;
     const mins = Math.floor(state.minutes);
     const hh = String(Math.floor(mins / 60)).padStart(2, '0');
     const mm = String(mins % 60).padStart(2, '0');
     $('day-time').textContent = `${t('day', this.lang)} ${state.day} • ${hh}:${mm}`;
-    const chips = [];
+    const bar = $('inv-bar');
+    while (bar.firstChild) bar.removeChild(bar.firstChild);
     const inv = state.inv;
-    const add = (emoji, n, label) => { if (n > 0) chips.push(`${emoji} ${label} ×${n}`); };
+    const add = (emoji, n, label) => {
+      if (n > 0) bar.appendChild(el('span', 'inv-chip', `${emoji} ${label} ×${n}`));
+    };
     add('🌱', inv.carrotSeed, 'Wortel'); add('🌱', inv.tomatoSeed, 'Tomat'); add('🌱', inv.pumpkinSeed, 'Labu');
     add('🌾', inv.feed, t('feed', this.lang));
     add('🥕', inv.carrot, 'Wortel'); add('🍅', inv.tomato, 'Tomat'); add('🎃', inv.pumpkin, 'Labu');
     add('🥚', inv.egg, 'Telur'); add('🥛', inv.milk, 'Susu');
-    $('inv-bar').innerHTML = chips.map((c) => `<span class="inv-chip">${c}</span>`).join('');
     $('shop-coins').textContent = `🪙 ${state.coins}`;
   }
-  // ---- Toko: tab Beli (benih + pakan) / Jual (hasil panen + ternak)
+
+  // ---------- Akun ----------
+  setAuthMode(mode) {
+    this._authMode = mode;
+    $('tab-login').classList.toggle('active', mode === 'login');
+    $('tab-register').classList.toggle('active', mode === 'register');
+    $('auth-pin-confirm-wrap').classList.toggle('hidden', mode !== 'register');
+    $('btn-auth-submit').textContent = mode === 'login' ? t('loginBtn', this.lang) : t('registerBtn', this.lang);
+    $('auth-pin').setAttribute('autocomplete', mode === 'login' ? 'current-password' : 'new-password');
+    this.setAuthError('');
+  }
+  setAuthError(msg) {
+    const e = $('auth-error');
+    e.textContent = msg || '';
+    e.classList.toggle('hidden', !msg);
+  }
+  setAuthBusy(busy) {
+    $('btn-auth-submit').disabled = busy;
+    $('btn-auth-submit').textContent = busy ? '…' : (this._authMode === 'login' ? t('loginBtn', this.lang) : t('registerBtn', this.lang));
+  }
+  _submitAuth() {
+    const username = $('auth-username').value;
+    const pin = $('auth-pin').value;
+    const pinConfirm = $('auth-pin-confirm').value;
+    this.h.onAuthSubmit(this._authMode, username, pin, pinConfirm);
+  }
+  // Tampilkan status login di layar awal. username ditampilkan via textContent.
+  setAuthState(username) {
+    const loggedIn = Boolean(username);
+    $('auth-logged-in').classList.toggle('hidden', !loggedIn);
+    $('auth-form').classList.toggle('hidden', loggedIn);
+    if (loggedIn) $('auth-who').textContent = t('loggedInAs', this.lang, { u: username });
+    const acc = $('settings-account');
+    if (acc) acc.textContent = loggedIn ? t('loggedInAs', this.lang, { u: username }) : t('offlineNote', this.lang);
+  }
+
+  // ---------- Kustomisasi ----------
+  openCustomize(state) {
+    state = state || this._lastState;
+    if (state) {
+      this._customGender = state.gender || 'male';
+      this._custom = sanitizeCustom(state.custom, this._customGender);
+    }
+    this._renderCustomOptions();
+    $('customize-modal').classList.remove('hidden');
+    this._startPreview();
+  }
+  closeCustomize() {
+    $('customize-modal').classList.add('hidden');
+    this._stopPreview();
+    this.toast(t('customSaved', this.lang));
+  }
+  _setCustomGender(gender) {
+    this._customGender = gender;
+    this._custom = sanitizeCustom(this._custom, gender);
+    $('custom-male').classList.toggle('active', gender === 'male');
+    $('custom-female').classList.toggle('active', gender === 'female');
+    this._renderCustomOptions();
+    this._rebuildPreview();
+    this.h.onCustomChange({ ...this._custom }, gender);
+  }
+  _renderCustomOptions() {
+    const box = $('custom-options');
+    while (box.firstChild) box.removeChild(box.firstChild);
+    $('custom-male').classList.toggle('active', this._customGender === 'male');
+    $('custom-female').classList.toggle('active', this._customGender === 'female');
+    for (const row of CUSTOM_ROWS) {
+      const wrap = el('div', 'custom-row');
+      wrap.appendChild(el('div', 'custom-label', t(row.label, this.lang)));
+      if (row.modelKey) {
+        const nav = el('div', 'custom-nav');
+        const prev = el('button', 'custom-arrow', '‹');
+        const name = el('span', 'custom-model-name');
+        const next = el('button', 'custom-arrow', '›');
+        const models = row.models;
+        const curIdx = () => Math.max(0, models.findIndex((m) => m.id === this._custom[row.modelKey]));
+        const show = () => { name.textContent = models[curIdx()].label || models[curIdx()].id; };
+        show();
+        const step = (d) => {
+          const i = (curIdx() + d + models.length) % models.length;
+          this._custom[row.modelKey] = models[i].id;
+          show();
+          this._rebuildPreview();
+          this.h.onCustomChange({ ...this._custom }, this._customGender);
+        };
+        prev.addEventListener('click', () => step(-1));
+        next.addEventListener('click', () => step(1));
+        nav.append(prev, name, next);
+        wrap.appendChild(nav);
+      }
+      const sw = el('div', 'custom-swatches');
+      for (const c of row.colors) {
+        const b = el('button', 'swatch' + (this._custom[row.colorKey] === c.id ? ' selected' : ''));
+        b.style.backgroundColor = c.hex;
+        b.title = c.id;
+        b.setAttribute('aria-label', c.id);
+        b.addEventListener('click', () => {
+          this._custom[row.colorKey] = c.id;
+          this._renderCustomOptions();
+          this._rebuildPreview();
+          this.h.onCustomChange({ ...this._custom }, this._customGender);
+        });
+        sw.appendChild(b);
+      }
+      wrap.appendChild(sw);
+      box.appendChild(wrap);
+    }
+    this._customOptionsBuilt = true;
+  }
+  _startPreview() {
+    const canvas = $('custom-preview');
+    if (!this._preview) {
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xf6c98a);
+      const camera = new THREE.PerspectiveCamera(40, 300 / 340, 0.1, 100);
+      camera.position.set(0, 1.6, 5.2);
+      camera.lookAt(0, 1.1, 0);
+      const sun = new THREE.DirectionalLight(0xffd9a0, 2.0);
+      sun.position.set(3, 6, 4);
+      scene.add(sun);
+      scene.add(new THREE.HemisphereLight(0xbfd9ff, 0x6a8f4f, 0.9));
+      const ground = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.1, 1.3, 0.25, 12),
+        new THREE.MeshLambertMaterial({ color: 0x5da244 }),
+      );
+      ground.position.y = -0.12;
+      scene.add(ground);
+      this._preview = { renderer, scene, camera, group: null, raf: 0, last: performance.now() };
+    }
+    this._rebuildPreview();
+    const tick = (now) => {
+      if ($('customize-modal').classList.contains('hidden')) return;
+      const p = this._preview;
+      if (!p) return;
+      const dt = Math.min(0.05, (now - p.last) / 1000);
+      p.last = now;
+      if (p.group) p.group.rotation.y += dt * 0.9; // karakter berputar
+      p.renderer.render(p.scene, p.camera);
+      p.raf = requestAnimationFrame(tick);
+    };
+    cancelAnimationFrame(this._preview.raf);
+    this._preview.raf = requestAnimationFrame(tick);
+  }
+  _rebuildPreview() {
+    const p = this._preview;
+    if (!p) return;
+    if (p.group) { p.scene.remove(p.group); p.group = null; }
+    p.group = buildCharacter(this._customGender, this._custom);
+    p.group.position.y = 0;
+    p.scene.add(p.group);
+  }
+  _stopPreview() {
+    if (this._preview) cancelAnimationFrame(this._preview.raf);
+  }
+
+  // ---------- Toko ----------
   openShop(tab, state) {
+    state = state || this._lastState;
+    if (!state) return;
     this._shopTab = tab || this._shopTab || 'buy';
     this._shopState = state;
     $('tab-buy').classList.toggle('active', this._shopTab === 'buy');
     $('tab-sell').classList.toggle('active', this._shopTab === 'sell');
     const box = $('shop-items');
-    box.innerHTML = '';
+    while (box.firstChild) box.removeChild(box.firstChild);
     if (this._shopTab === 'buy') {
       const items = [
         ...Object.values(CROPS).map((c) => ({
@@ -111,15 +327,12 @@ export class UI {
     $('shop-modal').classList.remove('hidden');
   }
   _shopRow(box, it, mode) {
-    const row = document.createElement('div');
-    row.className = 'shop-row';
-    const ownedTxt = mode === 'buy'
-      ? `${this.lang === 'id' ? 'Punya' : 'Owned'}: ${it.owned}`
-      : `${this.lang === 'id' ? 'Punya' : 'Owned'}: ${it.owned}`;
-    row.innerHTML = `<div class="info"><div class="name">${it.emoji} ${it.name}</div><div class="sub">${it.sub} • ${ownedTxt}</div></div>`;
-    const btn = document.createElement('button');
-    btn.className = 'buy-btn';
-    btn.textContent = mode === 'buy' ? `${t('buy', this.lang)} ${it.price} 🪙` : `${t('sell', this.lang)} ${it.price} 🪙`;
+    const row = el('div', 'shop-row');
+    const info = el('div', 'info');
+    info.appendChild(el('div', 'name', `${it.emoji} ${it.name}`));
+    info.appendChild(el('div', 'sub', `${it.sub} • ${this.lang === 'id' ? 'Punya' : 'Owned'}: ${it.owned}`));
+    row.appendChild(info);
+    const btn = el('button', 'buy-btn', mode === 'buy' ? `${t('buy', this.lang)} ${it.price} 🪙` : `${t('sell', this.lang)} ${it.price} 🪙`);
     btn.disabled = mode === 'sell' ? it.owned < 1 : false;
     btn.addEventListener('click', () => {
       if (mode === 'buy') this.h.onBuy(it.key, it.price, it.name);
@@ -133,16 +346,16 @@ export class UI {
   // ---- Picker tanaman
   openCropPicker(state, onPick) {
     const box = $('crop-list');
-    box.innerHTML = '';
+    while (box.firstChild) box.removeChild(box.firstChild);
     for (const c of Object.values(CROPS)) {
       const owned = state.inv[c.seedKey] || 0;
-      const row = document.createElement('div');
-      row.className = 'crop-row';
-      row.innerHTML = `<div class="info"><div class="name">${c.emoji} ${c.name}</div>` +
-        `<div class="sub">${c.days} ${this.lang === 'id' ? 'hari' : 'days'} • ${this.lang === 'id' ? 'jual' : 'sell'} ${c.sell} 🪙 • ${this.lang === 'id' ? 'benih' : 'seeds'}: ${owned}</div></div>`;
-      const btn = document.createElement('button');
-      btn.className = 'buy-btn';
-      btn.textContent = `${this.lang === 'id' ? 'Tanam' : 'Plant'} 🌱`;
+      const row = el('div', 'crop-row');
+      const info = el('div', 'info');
+      info.appendChild(el('div', 'name', `${c.emoji} ${c.name}`));
+      info.appendChild(el('div', 'sub',
+        `${c.days} ${this.lang === 'id' ? 'hari' : 'days'} • ${this.lang === 'id' ? 'jual' : 'sell'} ${c.sell} 🪙 • ${this.lang === 'id' ? 'benih' : 'seeds'}: ${owned}`));
+      row.appendChild(info);
+      const btn = el('button', 'buy-btn', `${this.lang === 'id' ? 'Tanam' : 'Plant'} 🌱`);
       btn.disabled = owned < 1;
       btn.addEventListener('click', () => { this.closeCropPicker(); onPick(c.id); });
       row.appendChild(btn);
@@ -155,10 +368,11 @@ export class UI {
   openSleep() { $('sleep-modal').classList.remove('hidden'); }
   closeSleep() { $('sleep-modal').classList.add('hidden'); }
   openSettings(state) {
-    $('setting-lang').value = state.lang;
-    $('setting-gender').value = state.gender;
-    $('setting-sound').value = state.sound ? 'on' : 'off';
-    $('setting-quality').value = state.quality;
+    const s = state || this._lastState || {};
+    $('setting-lang').value = s.lang || this.lang;
+    $('setting-gender').value = s.gender || 'male';
+    $('setting-sound').value = s.sound === false ? 'off' : 'on';
+    $('setting-quality').value = s.quality || 'medium';
     $('settings-modal').classList.remove('hidden');
   }
   closeSettings() { $('settings-modal').classList.add('hidden'); }
@@ -167,8 +381,8 @@ export class UI {
     $('orientation-overlay').classList.toggle('hidden', !show);
   }
   showError(msg) {
-    const el = $('error-box');
-    el.textContent = msg;
-    el.classList.remove('hidden');
+    const e = $('error-box');
+    e.textContent = msg;
+    e.classList.remove('hidden');
   }
 }
