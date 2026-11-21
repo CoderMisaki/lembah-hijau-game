@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Lembah Hijau — Game Berkebun</title>
+<link rel="stylesheet" href="styles.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+</head>
+<body>
+<div id="game-container">
+  <canvas id="game-canvas"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="hud-top">
+      <div id="hud-left">
+        <div id="coins-display">🪙 <span id="coins">50</span></div>
+        <div id="day-display">📅 <span id="day-time">Hari 1 • 06:00</span></div>
+      </div>
+      <div id="hud-right">
+        <button id="btn-shop" class="hud-btn" data-i18n="shop">🛒 Toko</button>
+        <button id="btn-settings" class="hud-btn" data-i18n="settings">⚙️ Pengaturan</button>
+      </div>
+    </div>
+    <div id="inv-bar"></div>
+    <div id="hint-bar"></div>
+  </div>
+
+  <!-- Touch controls -->
+  <div id="touch-controls" class="hidden">
+    <div id="joystick"><div id="joystick-knob"></div></div>
+    <div id="action-buttons">
+      <button id="btn-jump" class="round-btn">⬆</button>
+      <button id="btn-action" class="round-btn action">✋</button>
+    </div>
+  </div>
+
+  <!-- Start screen / character select -->
+  <div id="start-screen">
+    <div class="panel start-panel">
+      <h1>🌿 Lembah Hijau</h1>
+      <p class="subtitle" data-i18n="tagline">Lembah pastoral di dataran tinggi — berkebun, beternak, dan hidup tenang di golden hour.</p>
+      <h2 data-i18n="chooseChar">Pilih Karakter</h2>
+      <div id="char-select">
+        <button id="char-male" class="char-card selected" data-gender="male">
+          <span class="char-emoji">🧑‍🌾</span><span data-i18n="male">Laki-laki</span><span class="char-desc">Bima</span>
+        </button>
+        <button id="char-female" class="char-card" data-gender="female">
+          <span class="char-emoji">👩‍🌾</span><span data-i18n="female">Perempuan</span><span class="char-desc">Sari</span>
+        </button>
+      </div>
+      <button id="btn-start" class="primary-btn" data-i18n="startGame">▶ Mulai Bermain</button>
+      <p class="controls-hint" data-i18n="controlsHint">WASD / panah untuk bergerak • Spasi lompat • E aksi • Sentuh: joystick + tombol</p>
+      <p class="save-note" id="save-note"></p>
+    </div>
+  </div>
+
+  <!-- Shop modal -->
+  <div id="shop-modal" class="modal hidden">
+    <div class="panel modal-panel">
+      <h2 data-i18n="shop">🛒 Toko</h2>
+      <div class="tabs">
+        <button id="tab-buy" class="tab active" data-i18n="buy">Beli</button>
+        <button id="tab-sell" class="tab" data-i18n="sell">Jual</button>
+      </div>
+      <div id="shop-items"></div>
+      <div id="shop-coins"></div>
+      <button id="btn-close-shop" class="primary-btn" data-i18n="close">Tutup</button>
+    </div>
+  </div>
+
+  <!-- Crop picker modal -->
+  <div id="crop-modal" class="modal hidden">
+    <div class="panel modal-panel">
+      <h2 data-i18n="plantWhat">Tanam apa?</h2>
+      <div id="crop-list"></div>
+      <button id="btn-close-crop" class="primary-btn" data-i18n="cancel">Batal</button>
+    </div>
+  </div>
+
+  <!-- Sleep confirm modal -->
+  <div id="sleep-modal" class="modal hidden">
+    <div class="panel modal-panel">
+      <h2 data-i18n="sleepTitle">Tidur sampai besok?</h2>
+      <p data-i18n="sleepDesc">Tanaman yang disiram akan tumbuh, dan hewan yang diberi makan akan menghasilkan telur/susu di pagi hari.</p>
+      <div class="row-btns">
+        <button id="btn-sleep-yes" class="primary-btn" data-i18n="sleepYes">😴 Tidur</button>
+        <button id="btn-sleep-no" class="primary-btn secondary" data-i18n="cancel">Batal</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="panel modal-panel">
+      <h2 data-i18n="settings">⚙️ Pengaturan</h2>
+      <label><span data-i18n="language">Bahasa</span>
+        <select id="setting-lang"><option value="id">Bahasa Indonesia</option><option value="en">English</option></select>
+      </label>
+      <label><span data-i18n="character">Karakter</span>
+        <select id="setting-gender"><option value="male">Bima (Laki-laki)</option><option value="female">Sari (Perempuan)</option></select>
+      </label>
+      <label><span data-i18n="sound">Suara</span>
+        <select id="setting-sound"><option value="on">On</option><option value="off">Off</option></select>
+      </label>
+      <label><span data-i18n="quality">Kualitas Grafis</span>
+        <select id="setting-quality"><option value="low">Rendah</option><option value="medium">Sedang</option><option value="high">Tinggi</option></select>
+      </label>
+      <div class="row-btns">
+        <button id="btn-clear-save" class="danger-btn" data-i18n="clearSave">Hapus Save</button>
+        <button id="btn-close-settings" class="primary-btn" data-i18n="close">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Portrait / rotate overlay (mobile fallback) -->
+  <div id="orientation-overlay" class="hidden">
+    <div class="rotate-icon">📱↻</div>
+    <h2 data-i18n="rotateTitle">Putar perangkat Anda ke landscape</h2>
+    <p data-i18n="rotateDesc">Lembah Hijau dimainkan dalam mode landscape. Putar HP Anda menyamping untuk melanjutkan.</p>
+    <p class="rotate-en">Please rotate your device to landscape to play.</p>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+  <div id="error-box" class="hidden"></div>
+</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,141 @@
+/* Lembah Hijau — styles. Landscape-first, responsive, tap targets >=44px. */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #1d2b1a;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #2b2118; }
+#game-container { position: fixed; inset: 0; }
+#game-canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.hidden { display: none !important; }
+button { font-family: inherit; cursor: pointer; min-height: 44px; }
+
+/* ---------- HUD ---------- */
+#hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+#hud-top { display: flex; justify-content: space-between; align-items: flex-start; padding: 10px 12px; gap: 8px; }
+#hud-left { display: flex; flex-direction: column; gap: 6px; }
+#coins-display, #day-display {
+  background: rgba(20, 30, 16, .72); color: #ffe9a8; font-weight: 700;
+  padding: 8px 14px; border-radius: 999px; font-size: clamp(14px, 2.2vw, 18px);
+  border: 1px solid rgba(255, 233, 168, .35); width: max-content; max-width: 70vw;
+}
+.hud-btn {
+  pointer-events: auto; background: rgba(255, 248, 220, .94); border: 2px solid #8a6b3f;
+  border-radius: 12px; padding: 8px 14px; font-size: clamp(13px, 2vw, 16px); font-weight: 700; color: #4a3419;
+}
+#inv-bar {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 46vw;
+}
+.inv-chip {
+  background: rgba(20, 30, 16, .72); color: #fff; border-radius: 999px; padding: 6px 10px;
+  font-size: clamp(12px, 1.8vw, 14px); font-weight: 600; border: 1px solid rgba(255,255,255,.25);
+  white-space: nowrap;
+}
+#hint-bar {
+  position: absolute; bottom: 118px; left: 50%; transform: translateX(-50%);
+  background: rgba(20, 30, 16, .78); color: #fff; padding: 8px 16px; border-radius: 999px;
+  font-size: clamp(13px, 2vw, 16px); max-width: 86vw; text-align: center;
+}
+#hint-bar:empty { display: none; }
+
+/* ---------- Touch controls ---------- */
+#touch-controls { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
+#joystick {
+  position: absolute; left: 18px; bottom: 18px; width: 128px; height: 128px; border-radius: 50%;
+  background: rgba(255, 255, 255, .14); border: 2px solid rgba(255, 255, 255, .45);
+  pointer-events: auto; touch-action: none;
+}
+#joystick-knob {
+  position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; border-radius: 50%;
+  background: rgba(255, 248, 220, .9); border: 2px solid #8a6b3f;
+  transform: translate(-50%, -50%);
+}
+#action-buttons { position: absolute; right: 18px; bottom: 22px; display: flex; gap: 14px; align-items: flex-end; pointer-events: auto; }
+.round-btn {
+  width: 64px; height: 64px; border-radius: 50%; border: 2px solid #8a6b3f;
+  background: rgba(255, 248, 220, .92); font-size: 26px; color: #4a3419; min-height: 64px;
+}
+.round-btn.action { width: 76px; height: 76px; background: #ffb340; font-size: 15px; font-weight: 800; min-height: 76px; }
+.round-btn:active { transform: scale(.93); }
+
+/* ---------- Panels / modals ---------- */
+.panel {
+  background: linear-gradient(180deg, #fff8dc, #f3e3b3); border: 3px solid #8a6b3f;
+  border-radius: 18px; padding: 22px; box-shadow: 0 12px 40px rgba(0,0,0,.45);
+}
+#start-screen { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, rgba(255, 183, 77, .25), rgba(20, 60, 30, .55)); padding: 12px; overflow: auto; }
+.start-panel { max-width: 560px; width: 100%; text-align: center; max-height: 94vh; overflow: auto; }
+.start-panel h1 { font-size: clamp(30px, 6vw, 46px); color: #2e5d23; letter-spacing: .5px; }
+.subtitle { margin: 8px 0 16px; color: #5a4630; font-size: clamp(14px, 2.4vw, 17px); }
+.start-panel h2 { margin-bottom: 10px; color: #4a3419; font-size: clamp(17px, 3vw, 21px); }
+#char-select { display: flex; gap: 12px; justify-content: center; margin-bottom: 16px; flex-wrap: wrap; }
+.char-card {
+  display: flex; flex-direction: column; gap: 2px; align-items: center; padding: 12px 20px;
+  background: #fffdf2; border: 3px solid #c9b183; border-radius: 14px; font-size: 16px; font-weight: 700; color: #4a3419;
+}
+.char-card.selected { border-color: #2e7d32; background: #e8f5d8; box-shadow: 0 0 0 3px rgba(46,125,50,.25); }
+.char-emoji { font-size: 44px; }
+.char-desc { font-size: 13px; font-weight: 600; color: #7a6547; }
+.primary-btn {
+  background: #2e7d32; color: #fff; border: none; border-radius: 12px; padding: 12px 26px;
+  font-size: clamp(15px, 2.4vw, 18px); font-weight: 800;
+}
+.primary-btn.secondary { background: #8d7b5f; }
+.controls-hint, .save-note { margin-top: 12px; font-size: clamp(12px, 2vw, 14px); color: #6b5844; }
+.modal { position: absolute; inset: 0; z-index: 15; display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.5); padding: 12px; }
+.modal-panel { max-width: 520px; width: 100%; max-height: 88vh; overflow: auto; }
+.modal-panel h2 { margin-bottom: 12px; color: #2e5d23; }
+.tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.tab { flex: 1; padding: 10px; border-radius: 10px; border: 2px solid #8a6b3f; background: #fffdf2; font-weight: 800; font-size: 15px; }
+.tab.active { background: #2e7d32; color: #fff; }
+.shop-row, .crop-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: #fffdf2; border: 2px solid #d8c08d; border-radius: 12px; padding: 10px 12px; margin-bottom: 8px;
+}
+.shop-row .info, .crop-row .info { text-align: left; }
+.shop-row .name, .crop-row .name { font-weight: 800; font-size: 15px; }
+.shop-row .sub, .crop-row .sub { font-size: 13px; color: #7a6547; }
+.buy-btn { background: #ffb340; border: none; border-radius: 10px; padding: 9px 16px; font-weight: 800; white-space: nowrap; }
+.buy-btn:disabled { opacity: .45; cursor: not-allowed; }
+#shop-coins { font-weight: 800; margin: 10px 0; color: #4a3419; }
+.row-btns { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.row-btns .primary-btn { flex: 1; }
+.danger-btn { background: #b3261e; color: #fff; border: none; border-radius: 12px; padding: 12px 18px; font-weight: 800; }
+.modal-panel label { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  margin-bottom: 12px; font-weight: 700; }
+.modal-panel select { padding: 10px; border-radius: 10px; border: 2px solid #8a6b3f; font-size: 15px; background: #fff; min-height: 44px; }
+
+/* ---------- Overlay / toast / error ---------- */
+#orientation-overlay {
+  position: absolute; inset: 0; z-index: 40; background: #16240f; color: #ffe9a8;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; gap: 12px;
+}
+.rotate-icon { font-size: 64px; animation: wiggle 1.6s ease-in-out infinite; }
+@keyframes wiggle { 0%,100% { transform: rotate(-12deg); } 50% { transform: rotate(78deg); } }
+#orientation-overlay h2 { font-size: clamp(19px, 4vw, 26px); }
+#orientation-overlay p { font-size: clamp(14px, 2.6vw, 17px); max-width: 480px; color: #e8f5d8; }
+#toast {
+  position: absolute; bottom: 200px; left: 50%; transform: translateX(-50%); z-index: 30;
+  background: rgba(20, 30, 16, .88); color: #ffe9a8; padding: 10px 18px; border-radius: 999px;
+  font-weight: 700; font-size: clamp(13px, 2.2vw, 16px); max-width: 88vw; text-align: center;
+  border: 1px solid rgba(255,233,168,.4); pointer-events: none;
+}
+#error-box {
+  position: absolute; top: 10px; left: 10px; right: 10px; z-index: 50; background: #7f1d1d; color: #fff;
+  padding: 12px; border-radius: 10px; font-size: 14px; white-space: pre-wrap;
+}
+
+/* ---------- Small screens / landscape phones ---------- */
+@media (max-width: 700px) {
+  #inv-bar { max-width: 52vw; top: auto; bottom: 170px; left: 50%; }
+  #hint-bar { bottom: 158px; }
+  #joystick { width: 112px; height: 112px; }
+  .round-btn { width: 56px; height: 56px; }
+  .round-btn.action { width: 68px; height: 68px; }
+}
+@media (max-height: 480px) {
+  #inv-bar { display: none; }
+  #hint-bar { bottom: 150px; }
+  .start-panel { padding: 14px; }
+  .char-emoji { font-size: 32px; }
+}
