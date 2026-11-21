@@ -1,3 +1,4 @@
 # State lokal wrangler dev (D1 lokal, cache) — jangan di-commit.
 .wrangler/
 node_modules/
+supabase/.temp/
