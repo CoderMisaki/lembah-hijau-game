@@ -107,3 +107,7 @@ harus kembali utuh.
 
 Free tier: Workers 100.000 request/hari, D1 5 GB storage + 5 juta baris
 dibaca/hari, Pages unlimited bandwidth (fair use). Game ini jauh di bawah itu.
+
+## GitHub Pages (mode offline, tanpa backend)
+Game statis sudah live di https://codermisaki.github.io/lembah-hijau-game/ (branch main, `.nojekyll`).
+Tanpa backend, game jalan penuh dalam mode offline: daftar/login diganti tombol "Main Offline" di layar awal, save ke localStorage. Setelah Worker ter-deploy (langkah di atas), isi meta `lh-api-base` di `index.html` dengan URL Worker agar save cloud aktif.
