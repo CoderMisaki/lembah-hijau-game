@@ -5,11 +5,11 @@ export const STRINGS = {
   chooseChar: { id: 'Pilih Karakter', en: 'Choose Character' },
   male: { id: 'Laki-laki', en: 'Male' },
   female: { id: 'Perempuan', en: 'Female' },
-  startGame: { id: '▶ Mulai Bermain', en: '▶ Start Playing' },
+  startGame: { id: 'Mulai Bermain', en: 'Start Playing' },
   controlsHint: { id: 'WASD / panah untuk bergerak • Spasi lompat • E aksi • Sentuh: joystick + tombol',
                   en: 'WASD / arrows to move • Space to jump • E to interact • Touch: joystick + buttons' },
-  shop: { id: '🛒 Toko', en: '🛒 Shop' },
-  settings: { id: '⚙️ Pengaturan', en: '⚙️ Settings' },
+  shop: { id: 'Toko', en: 'Shop' },
+  settings: { id: 'Pengaturan', en: 'Settings' },
   buy: { id: 'Beli', en: 'Buy' },
   sell: { id: 'Jual', en: 'Sell' },
   close: { id: 'Tutup', en: 'Close' },
@@ -18,7 +18,7 @@ export const STRINGS = {
   sleepTitle: { id: 'Tidur sampai besok?', en: 'Sleep until tomorrow?' },
   sleepDesc: { id: 'Tanaman yang disiram akan tumbuh, dan hewan yang diberi makan akan menghasilkan telur/susu di pagi hari.',
               en: 'Watered crops will grow, and fed animals will produce eggs/milk in the morning.' },
-  sleepYes: { id: '😴 Tidur', en: '😴 Sleep' },
+  sleepYes: { id: 'Tidur', en: 'Sleep' },
   language: { id: 'Bahasa', en: 'Language' },
   character: { id: 'Karakter', en: 'Character' },
   sound: { id: 'Suara', en: 'Sound' },
@@ -28,30 +28,30 @@ export const STRINGS = {
   rotateDesc: { id: 'Lembah Hijau dimainkan dalam mode landscape. Putar HP Anda menyamping untuk melanjutkan.',
                 en: 'Lembah Hijau is played in landscape mode. Turn your phone sideways to continue.' },
   day: { id: 'Hari', en: 'Day' },
-  actionHoe: { id: '⛏️ Cangkul', en: '⛏️ Hoe' },
-  actionPlant: { id: '🌱 Tanam', en: '🌱 Plant' },
-  actionWater: { id: '💧 Siram', en: '💧 Water' },
-  actionHarvest: { id: '🧺 Panen', en: '🧺 Harvest' },
-  actionSleep: { id: '😴 Tidur', en: '😴 Sleep' },
-  actionShop: { id: '🛒 Toko', en: '🛒 Shop' },
-  actionFeed: { id: '🌾 Beri Makan', en: '🌾 Feed' },
-  actionCollect: { id: '🥚 Ambil Hasil', en: '🥚 Collect' },
-  actionPush: { id: '📦 Dorong', en: '📦 Push' },
+  actionHoe: { id: 'Cangkul', en: 'Hoe' },
+  actionPlant: { id: 'Tanam', en: 'Plant' },
+  actionWater: { id: 'Siram', en: 'Water' },
+  actionHarvest: { id: 'Panen', en: 'Harvest' },
+  actionSleep: { id: 'Tidur', en: 'Sleep' },
+  actionShop: { id: 'Toko', en: 'Shop' },
+  actionFeed: { id: 'Beri Makan', en: 'Feed' },
+  actionCollect: { id: 'Ambil Hasil', en: 'Collect' },
+  actionPush: { id: 'Dorong', en: 'Push' },
   hintNearPlot: { id: 'Dekati petak lalu tekan Aksi', en: 'Walk to a plot, then press Action' },
   needSeeds: { id: 'Tidak ada benih — beli di Toko dulu.', en: 'No seeds — buy some at the Shop first.' },
   needCoins: { id: 'Koin tidak cukup.', en: 'Not enough coins.' },
   needFeed: { id: 'Butuh pakan (2 koin) — beli di Toko atau koin akan dipotong langsung.', en: 'Needs feed (2 coins) — buy at the Shop or coins are deducted directly.' },
   planted: { id: 'Benih ditanam. Jangan lupa disiram!', en: 'Seed planted. Don’t forget to water it!' },
-  watered: { id: 'Tanaman disiram 💧', en: 'Crop watered 💧' },
+  watered: { id: 'Tanaman disiram.', en: 'Crop watered.' },
   hoed: { id: 'Tanah dicangkul.', en: 'Soil hoed.' },
   harvested: { id: 'Panen! +1 hasil.', en: 'Harvested! +1 produce.' },
   sold: { id: 'Terjual! +{n} koin.', en: 'Sold! +{n} coins.' },
   bought: { id: 'Dibeli: {item}.', en: 'Bought: {item}.' },
-  fed: { id: 'Hewan diberi makan. Besok pagi ada hasil. 🐔', en: 'Animal fed. There will be produce tomorrow morning. 🐔' },
+  fed: { id: 'Hewan diberi makan. Besok pagi ada hasil.', en: 'Animal fed. There will be produce tomorrow morning.' },
   collected: { id: 'Diambil: {n} {item}.', en: 'Collected: {n} {item}.' },
   nothingToSell: { id: 'Tidak ada hasil untuk dijual.', en: 'Nothing to sell.' },
   nothingToCollect: { id: 'Belum ada hasil ternak.', en: 'No animal produce yet.' },
-  morning: { id: 'Selamat pagi! Hari {d} — tanaman tumbuh, ternak menghasilkan. 🌅', en: 'Good morning! Day {d} — crops grew, animals produced. 🌅' },
+  morning: { id: 'Selamat pagi! Hari {d} — tanaman tumbuh, ternak menghasilkan.', en: 'Good morning! Day {d} — crops grew, animals produced.' },
   saved: { id: 'Progress tersimpan.', en: 'Progress saved.' },
   saveCleared: { id: 'Save dihapus. Memuat ulang…', en: 'Save deleted. Reloading…' },
   qualityLowered: { id: 'Performa rendah — kualitas grafis diturunkan otomatis.', en: 'Low performance — graphics quality lowered automatically.' },
@@ -82,11 +82,11 @@ export const STRINGS = {
   invalidPin: { id: 'PIN harus tepat 6 digit angka.', en: 'PIN must be exactly 6 digits.' },
   pinMismatch: { id: 'Konfirmasi PIN tidak sama.', en: 'PIN confirmation does not match.' },
   usernameTaken: { id: 'Username sudah dipakai. Pilih username lain.', en: 'Username is taken. Choose another one.' },
-  account: { id: '👤 Akun', en: '👤 Account' },
+  account: { id: 'Akun', en: 'Account' },
   deleteServerSave: { id: 'Hapus Save Server', en: 'Delete Server Save' },
   serverSaveDeleted: { id: 'Save server dihapus.', en: 'Server save deleted.' },
   // ---- Kustomisasi karakter ----
-  customize: { id: '🎨 Kustomisasi', en: '🎨 Customize' },
+  customize: { id: 'Kustomisasi', en: 'Customize' },
   customizeTitle: { id: 'Kustomisasi Karakter', en: 'Customize Character' },
   skin: { id: 'Warna kulit', en: 'Skin tone' },
   hairStyle: { id: 'Gaya rambut', en: 'Hairstyle' },
@@ -102,16 +102,19 @@ export const STRINGS = {
   shoesModel: { id: 'Sepatu', en: 'Shoes' },
   shoesColor: { id: 'Warna sepatu', en: 'Shoes color' },
   model: { id: 'Model', en: 'Model' },
+  prevModel: { id: 'Sebelumnya', en: 'Previous' },
+  nextModel: { id: 'Berikutnya', en: 'Next' },
+  jump: { id: 'Lompat', en: 'Jump' },
   color: { id: 'Warna', en: 'Color' },
   resetCustom: { id: 'Reset', en: 'Reset' },
   customSaved: { id: 'Penampilan disimpan.', en: 'Look saved.' },
   // ---- Save / Load ----
-  saveBtn: { id: '💾 Simpan', en: '💾 Save' },
-  loadBtn: { id: '📂 Muat', en: '📂 Load' },
+  saveBtn: { id: 'Simpan', en: 'Save' },
+  loadBtn: { id: 'Muat', en: 'Load' },
   saving: { id: 'Menyimpan…', en: 'Saving…' },
-  savedCloud: { id: '✓ Berhasil tersimpan di server!', en: '✓ Progress saved to the server!' },
-  savedLocal: { id: '✓ Tersimpan di perangkat (offline — akan disinkron saat online).',
-                en: '✓ Saved on this device (offline — will sync when online).' },
+  savedCloud: { id: '✓ Berhasil tersimpan di server!', en: '✓ Progress saved to the server!' }, // taste-skill-ignore: ✓ is a text check mark in toast copy, not an emoji icon
+  savedLocal: { id: '✓ Tersimpan di perangkat (offline — akan disinkron saat online).', // taste-skill-ignore: ✓ is a text check mark in toast copy, not an emoji icon
+                en: '✓ Saved on this device (offline — will sync when online).' }, // taste-skill-ignore: ✓ is a text check mark in toast copy, not an emoji icon
   loadedCloud: { id: 'Progress dimuat dari server.', en: 'Progress loaded from the server.' },
   loadFailed: { id: 'Gagal memuat dari server.', en: 'Failed to load from the server.' },
   noServerSave: { id: 'Belum ada save di server.', en: 'No save on the server yet.' },
@@ -132,7 +135,11 @@ export function t(key, lang = 'id', vars = {}) {
 export function applyI18n(lang) {
   document.querySelectorAll('[data-i18n]').forEach((el) => {
     const key = el.getAttribute('data-i18n');
-    if (STRINGS[key]) el.textContent = t(key, lang);
+    if (!STRINGS[key]) return;
+    // Hanya node teks yang diganti — ikon SVG (.ui-icon) di dalam elemen
+    // (mis. tombol HUD) dipertahankan agar tidak hilang saat ganti bahasa.
+    [...el.childNodes].forEach((n) => { if (n.nodeType === Node.TEXT_NODE) n.remove(); });
+    el.appendChild(document.createTextNode(t(key, lang)));
   });
   document.documentElement.lang = lang;
 }

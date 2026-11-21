@@ -6,9 +6,9 @@ import { terrainHeight } from './physics.js';
 import { FARM_ORIGIN, FARM_COLS, FARM_ROWS, FARM_SPACING } from './world.js';
 
 export const CROPS = {
-  carrot:  { id: 'carrot',  name: 'Wortel', emoji: '🥕', days: 2, seed: 4,  sell: 12, color: 0xe87a2a, seedKey: 'carrotSeed' },
-  tomato:  { id: 'tomato',  name: 'Tomat',  emoji: '🍅', days: 3, seed: 8,  sell: 20, color: 0xd9382b, seedKey: 'tomatoSeed' },
-  pumpkin: { id: 'pumpkin', name: 'Labu',   emoji: '🎃', days: 4, seed: 14, sell: 32, color: 0xe8912a, seedKey: 'pumpkinSeed' },
+  carrot:  { id: 'carrot',  name: 'Wortel', icon: 'carrot', days: 2, seed: 4,  sell: 12, color: 0xe87a2a, seedKey: 'carrotSeed' },
+  tomato:  { id: 'tomato',  name: 'Tomat',  icon: 'tomato', days: 3, seed: 8,  sell: 20, color: 0xd9382b, seedKey: 'tomatoSeed' },
+  pumpkin: { id: 'pumpkin', name: 'Labu',   icon: 'pumpkin', days: 4, seed: 14, sell: 32, color: 0xe8912a, seedKey: 'pumpkinSeed' },
 };
 
 export function plotPos(ix, iz) {
@@ -48,6 +48,24 @@ export class Farm {
       }
     }
     this.refreshAll();
+    // Orang-orangan sawah di sudut kebun (dekoratif, tanpa collider).
+    const sc = new THREE.Group();
+    const scX = FARM_ORIGIN.x + (FARM_COLS - 1) * FARM_SPACING + 1.4;
+    const scZ = FARM_ORIGIN.z + (FARM_ROWS - 1) * FARM_SPACING + 1.4;
+    const scY = terrainHeight(scX, scZ);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 2.2, 5), mat(0x6e4a26));
+    pole.position.y = 1.1; sc.add(pole);
+    const cross = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.6, 5), mat(0x6e4a26));
+    cross.rotation.z = Math.PI / 2; cross.position.y = 1.7; sc.add(cross);
+    const shirt = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.0, 6), mat(0xd9382b));
+    shirt.position.y = 1.5; sc.add(shirt);
+    const shead = new THREE.Mesh(new THREE.SphereGeometry(0.28, 8, 8), mat(0xe8c9a8));
+    shead.position.y = 2.25; sc.add(shead);
+    const hat = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.35, 8), mat(0xf2d06b));
+    hat.position.y = 2.55; sc.add(hat);
+    sc.position.set(scX, scY, scZ);
+    sc.rotation.y = Math.PI * 0.25;
+    this.group.add(sc);
   }
   stageOf(plot) {
     if (!plot.crop) return -1;

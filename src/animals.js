@@ -7,8 +7,8 @@ import { terrainHeight, clamp } from './physics.js';
 import { PEN } from './world.js';
 
 export const ANIMAL_DEFS = {
-  ayam: { name: 'Ayam', emoji: '🐔', produce: 'egg', produceName: 'Telur', sell: 8, count: 3 },
-  sapi: { name: 'Sapi', emoji: '🐄', produce: 'milk', produceName: 'Susu', sell: 15, count: 2 },
+  ayam: { name: 'Ayam', icon: 'chicken', produce: 'egg', produceName: 'Telur', sell: 8, count: 3 },
+  sapi: { name: 'Sapi', icon: 'cow', produce: 'milk', produceName: 'Susu', sell: 15, count: 2 },
 };
 
 function mat(color) { return new THREE.MeshLambertMaterial({ color }); }
@@ -23,6 +23,10 @@ function buildChicken() {
   beak.rotation.x = Math.PI / 2; beak.position.set(0, 0.76, 0.44); g.add(beak);
   const comb = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.18), mat(0xd9382b));
   comb.position.set(0, 0.98, 0.22); g.add(comb);
+  for (const s of [-1, 1]) {
+    const wing = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6), mat(0xe8e0d0));
+    wing.scale.set(0.4, 0.8, 1); wing.position.set(s * 0.3, 0.45, 0); g.add(wing);
+  }
   const tail = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.35, 5), mat(0xd8d0c0));
   tail.rotation.x = -0.9; tail.position.set(0, 0.6, -0.36); g.add(tail);
   return g;
@@ -36,6 +40,15 @@ function buildCow() {
   head.position.set(0.85, 1.05, 0); g.add(head);
   const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.35, 0.42), mat(0xe8c9a8));
   muzzle.position.set(1.15, 0.9, 0); g.add(muzzle);
+  // Bercak coklat gelap di badan + ambing + lonceng leher.
+  for (const [px, pz] of [[-0.2, 0.36], [0.3, -0.36]]) {
+    const spot = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.3, 0.05), mat(0x4a2f1a));
+    spot.position.set(px, 0.95, pz); g.add(spot);
+  }
+  const udder = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), mat(0xe8a0a8));
+  udder.position.set(0, 0.45, 0); udder.scale.y = 0.7; g.add(udder);
+  const bell = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), mat(0xf2d06b));
+  bell.position.set(0.85, 0.62, 0); g.add(bell);
   for (const s of [-1, 1]) {
     const horn = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.3, 6), mat(0xf5f0e6));
     horn.position.set(0.8, 1.4, s * 0.22); horn.rotation.z = -0.5; g.add(horn);

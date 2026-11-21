@@ -1,38 +1,157 @@
-/* Lembah Hijau — styles. Landscape-first, responsive, tap targets >=44px. */
+/* ==========================================================================
+   Lembah Hijau — styles
+   Bahasa visual: material lembah itu sendiri — kertas krem, kayu, daun,
+   emas matahari. Token di :root (PRODUCT.md); semua warna downstream
+   WAJIB pakai token. Flat + hairline, bukan kartu melayang.
+   Landscape-first, responsif 390/768/1440, tap target >=44px.
+   ========================================================================== */
+
+:root {
+  /* --- Token warna (PRODUCT.md) --- */
+  --lh-paper: #fff8dc;      /* panel kertas */
+  --lh-paper-2: #fffdf2;    /* permukaan panel lebih terang */
+  --lh-ink: #2b2118;        /* teks utama */
+  --lh-bark: #4a3419;       /* teks sekunder / kayu gelap */
+  --lh-leaf: #2e7d32;       /* hijau daun — satu-satunya hijau aksi */
+  --lh-valley: #5da244;     /* hijau rumput dunia 3D */
+  --lh-sun: #ffb340;        /* emas matahari — aksen sekali-sekali */
+  --lh-wood: #8a6b3f;       /* kayu — border & bingkai */
+  --lh-night: #16240f;      /* overlay gelap */
+
+  /* --- Token turunan (dari token di atas, bukan warna bebas) --- */
+  --lh-pine: #2e5d23;       /* hijau daun gelap — judul display */
+  --lh-cream: #ffe9a8;      /* krem matahari — teks di atas gelap */
+  --lh-leaf-soft: #e8f5d8;  /* tint daun — state terpilih */
+  --lh-hairline: #d8c08d;   /* pemisah 1px */
+  --lh-hairline-soft: #c9b183; /* border kayu muda */
+  --lh-muted: #7a6547;      /* teks tersier */
+  --lh-note: #6b5844;       /* teks catatan */
+  --lh-hint: #5a4630;       /* teks subjudul */
+  --lh-stone: #7d6c52;      /* tombol sekunder — 5.07:1 vs putih, lolos WCAG AA */
+  --lh-leaf-dark: #276b2b;   /* hover tombol daun */
+  --lh-stone-dark: #6f6046;  /* hover tombol sekunder — 6.11:1 */
+  --lh-sun-dark: #ffa726;    /* hover tombol emas */
+  --lh-white: #ffffff;       /* teks di atas permukaan berwarna */
+  --lh-danger: #b3261e;     /* aksi destruktif */
+  --lh-error-bg: #7f1d1d;   /* kotak error */
+  --lh-sun-deep: #f6c98a;   /* krem senja — fallback preview */
+  --lh-leaf-tint: rgba(46, 125, 50, .14);
+  --lh-shadow: 0 10px 28px rgba(43, 33, 24, .22);
+
+  /* --- Spacing (skala 4/8/12/16/24) --- */
+  --lh-s1: 4px;
+  --lh-s2: 8px;
+  --lh-s3: 12px;
+  --lh-s4: 16px;
+  --lh-s6: 24px;
+
+  /* --- Radius: panel 18 / tombol 12 / chip 999 --- */
+  --lh-r-panel: 18px;
+  --lh-r-btn: 12px;
+  --lh-r-chip: 999px;
+
+  /* --- Tipografi --- */
+  --lh-display: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+  --lh-text: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* --- Motion --- */
+  --lh-ease: cubic-bezier(.22, 1, .36, 1);
+  --lh-t-fast: 160ms;
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { width: 100%; height: 100%; overflow: hidden; background: #1d2b1a;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #2b2118; }
+html, body {
+  width: 100%; height: 100%; overflow: hidden;
+  background: var(--lh-night);
+  font-family: var(--lh-text); color: var(--lh-ink);
+  line-height: 1.5;
+}
 #game-container { position: fixed; inset: 0; }
 #game-canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 .hidden { display: none !important; }
 button { font-family: inherit; cursor: pointer; min-height: 44px; }
 
+/* --- Permukaan browser ikut berbahasa token --- */
+::selection { background: var(--lh-sun); color: var(--lh-ink); }
+input, select { caret-color: var(--lh-leaf); }
+:focus-visible {
+  outline: 3px solid var(--lh-leaf);
+  outline-offset: 2px;
+  border-radius: var(--lh-r-btn);
+}
+.modal-panel::-webkit-scrollbar,
+.start-panel::-webkit-scrollbar { width: 8px; }
+.modal-panel::-webkit-scrollbar-thumb,
+.start-panel::-webkit-scrollbar-thumb {
+  background: var(--lh-hairline-soft); border-radius: var(--lh-r-chip);
+}
+.modal-panel::-webkit-scrollbar-track,
+.start-panel::-webkit-scrollbar-track { background: transparent; }
+
+/* --- Judul display: serif buku cerita, leading rapat --- */
+h1, h2 {
+  font-family: var(--lh-display);
+  font-weight: 700;
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
 /* ---------- HUD ---------- */
 #hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
-#hud-top { display: flex; justify-content: space-between; align-items: flex-start; padding: 10px 12px; gap: 8px; }
+#hud-top {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  padding: 10px var(--lh-s3); gap: var(--lh-s2); flex-wrap: wrap;
+}
 #hud-left { display: flex; flex-direction: column; gap: 6px; }
+#hud-right { display: flex; gap: var(--lh-s2); flex-wrap: wrap; justify-content: flex-end; }
+/* Chip kertas flat — bukan pill gelap: kertas + border kayu, radius tombol. */
 #coins-display, #day-display {
-  background: rgba(20, 30, 16, .72); color: #ffe9a8; font-weight: 700;
-  padding: 8px 14px; border-radius: 999px; font-size: clamp(14px, 2.2vw, 18px);
-  border: 1px solid rgba(255, 233, 168, .35); width: max-content; max-width: 70vw;
+  background: var(--lh-paper);
+  color: var(--lh-ink);
+  font-weight: 700;
+  padding: var(--lh-s2) 14px;
+  border: 2px solid var(--lh-wood);
+  border-radius: var(--lh-r-btn);
+  font-size: clamp(14px, 2.2vw, 18px);
+  width: max-content; max-width: 70vw;
+  font-variant-numeric: tabular-nums;
 }
+#coins-display { color: var(--lh-bark); }
 .hud-btn {
-  pointer-events: auto; background: rgba(255, 248, 220, .94); border: 2px solid #8a6b3f;
-  border-radius: 12px; padding: 8px 14px; font-size: clamp(13px, 2vw, 16px); font-weight: 700; color: #4a3419;
+  pointer-events: auto;
+  background: var(--lh-paper-2);
+  border: 2px solid var(--lh-wood);
+  border-radius: var(--lh-r-btn);
+  padding: var(--lh-s2) 14px;
+  font-size: clamp(13px, 2vw, 16px);
+  font-weight: 700; color: var(--lh-bark);
+  transition: transform var(--lh-t-fast) var(--lh-ease), background-color var(--lh-t-fast) var(--lh-ease);
 }
+.hud-btn:hover { background: var(--lh-paper); }
+.hud-btn:active { transform: scale(.97); }
 #inv-bar {
   position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
   display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 46vw;
 }
 .inv-chip {
-  background: rgba(20, 30, 16, .72); color: #fff; border-radius: 999px; padding: 6px 10px;
-  font-size: clamp(12px, 1.8vw, 14px); font-weight: 600; border: 1px solid rgba(255,255,255,.25);
+  background: var(--lh-paper-2);
+  color: var(--lh-ink);
+  border: 1px solid var(--lh-hairline);
+  border-radius: var(--lh-r-btn);
+  padding: 6px 10px;
+  font-size: clamp(12px, 1.8vw, 14px); font-weight: 600;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 #hint-bar {
   position: absolute; bottom: 118px; left: 50%; transform: translateX(-50%);
-  background: rgba(20, 30, 16, .78); color: #fff; padding: 8px 16px; border-radius: 999px;
-  font-size: clamp(13px, 2vw, 16px); max-width: 86vw; text-align: center;
+  background: var(--lh-paper);
+  color: var(--lh-ink);
+  border: 2px solid var(--lh-wood);
+  padding: var(--lh-s2) var(--lh-s4);
+  border-radius: var(--lh-r-btn);
+  font-size: clamp(13px, 2vw, 16px);
+  max-width: 86vw; text-align: center;
 }
 #hint-bar:empty { display: none; }
 
@@ -40,126 +159,234 @@ button { font-family: inherit; cursor: pointer; min-height: 44px; }
 #touch-controls { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
 #joystick {
   position: absolute; left: 18px; bottom: 18px; width: 128px; height: 128px; border-radius: 50%;
-  background: rgba(255, 255, 255, .14); border: 2px solid rgba(255, 255, 255, .45);
+  background: rgba(255, 248, 220, .22); border: 2px solid rgba(255, 248, 220, .6);
   pointer-events: auto; touch-action: none;
 }
 #joystick-knob {
   position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; border-radius: 50%;
-  background: rgba(255, 248, 220, .9); border: 2px solid #8a6b3f;
+  background: var(--lh-paper); border: 2px solid var(--lh-wood);
   transform: translate(-50%, -50%);
 }
 #action-buttons { position: absolute; right: 18px; bottom: 22px; display: flex; gap: 14px; align-items: flex-end; pointer-events: auto; }
 .round-btn {
-  width: 64px; height: 64px; border-radius: 50%; border: 2px solid #8a6b3f;
-  background: rgba(255, 248, 220, .92); font-size: 26px; color: #4a3419; min-height: 64px;
+  width: 64px; height: 64px; border-radius: 50%; border: 2px solid var(--lh-wood);
+  background: var(--lh-paper); font-size: 26px; color: var(--lh-bark); min-height: 64px;
+  transition: transform var(--lh-t-fast) var(--lh-ease);
 }
-.round-btn.action { width: 76px; height: 76px; background: #ffb340; font-size: 15px; font-weight: 800; min-height: 76px; }
+.round-btn.action {
+  width: 76px; height: 76px; background: var(--lh-sun);
+  font-size: 15px; font-weight: 800; min-height: 76px; color: var(--lh-ink);
+}
 .round-btn:active { transform: scale(.93); }
 
+/* ---------- Ikon SVG (pengganti glyph UI) ---------- */
+/* Satu bobot garis, warna mengikuti teks via currentColor. */
+.ui-icon { width: 1em; height: 1em; vertical-align: -.12em; flex: none; }
+/* Ikon di depan teks tombol/judul: jarak dari margin, karena applyI18n
+   mengganti node teks (spasi literal di HTML tidak bertahan saat ganti bahasa). */
+.hud-btn .ui-icon, .primary-btn .ui-icon, .modal-panel h2 .ui-icon { margin-right: .3em; }
+.start-panel h1 .ui-icon { width: .85em; height: .85em; margin-right: .1em; }
+.round-btn .ui-icon { width: 28px; height: 28px; }
+#coins-display .ui-icon, #day-display .ui-icon { width: 1.15em; height: 1.15em; }
+#shop-coins .ui-icon { width: 1.15em; height: 1.15em; }
+.char-icon .ui-icon { width: 44px; height: 44px; }
+.rotate-icon .ui-icon { width: 64px; height: 64px; }
+
 /* ---------- Panels / modals ---------- */
+/* Satu bahasa: permukaan kertas FLAT, border kayu 2px, bayangan lembut ber-offset. */
 .panel {
-  background: linear-gradient(180deg, #fff8dc, #f3e3b3); border: 3px solid #8a6b3f;
-  border-radius: 18px; padding: 22px; box-shadow: 0 12px 40px rgba(0,0,0,.45);
+  background: var(--lh-paper);
+  border: 2px solid var(--lh-wood);
+  border-radius: var(--lh-r-panel);
+  padding: 22px;
+  box-shadow: var(--lh-shadow); /* taste-skill-ignore: real modal overlay, shadow allowed */
 }
-#start-screen { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(180deg, rgba(255, 183, 77, .25), rgba(20, 60, 30, .55)); padding: 12px; overflow: auto; }
+#start-screen {
+  position: absolute; inset: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(46, 38, 20, .40); /* flat scrim over the live 3D scene — warm, light enough for golden hour to glow through */
+  padding: var(--lh-s3); overflow: auto;
+}
 .start-panel { max-width: 560px; width: 100%; text-align: center; max-height: 94vh; overflow: auto; }
-.start-panel h1 { font-size: clamp(30px, 6vw, 46px); color: #2e5d23; letter-spacing: .5px; }
-.subtitle { margin: 8px 0 16px; color: #5a4630; font-size: clamp(14px, 2.4vw, 17px); }
-.start-panel h2 { margin-bottom: 10px; color: #4a3419; font-size: clamp(17px, 3vw, 21px); }
-#char-select { display: flex; gap: 12px; justify-content: center; margin-bottom: 16px; flex-wrap: wrap; }
+.start-panel h1 { font-size: clamp(30px, 6vw, 46px); color: var(--lh-pine); letter-spacing: .5px; }
+.subtitle { margin: var(--lh-s2) 0 var(--lh-s4); color: var(--lh-hint); font-size: clamp(14px, 2.4vw, 17px); }
+.start-panel h2 { margin-bottom: 10px; color: var(--lh-bark); font-size: clamp(17px, 3vw, 21px); }
+#char-select { display: flex; gap: var(--lh-s3); justify-content: center; margin-bottom: var(--lh-s4); flex-wrap: wrap; }
 .char-card {
-  display: flex; flex-direction: column; gap: 2px; align-items: center; padding: 12px 20px;
-  background: #fffdf2; border: 3px solid #c9b183; border-radius: 14px; font-size: 16px; font-weight: 700; color: #4a3419;
+  display: flex; flex-direction: column; gap: 2px; align-items: center; padding: var(--lh-s3) 20px;
+  background: var(--lh-paper-2); border: 2px solid var(--lh-hairline-soft);
+  border-radius: 14px; font-size: 16px; font-weight: 700; color: var(--lh-bark);
+  transition: border-color var(--lh-t-fast) var(--lh-ease), background-color var(--lh-t-fast) var(--lh-ease);
 }
-.char-card.selected { border-color: #2e7d32; background: #e8f5d8; box-shadow: 0 0 0 3px rgba(46,125,50,.25); }
-.char-emoji { font-size: 44px; }
-.char-desc { font-size: 13px; font-weight: 600; color: #7a6547; }
+.char-card.selected { border-color: var(--lh-leaf); background: var(--lh-leaf-soft); }
+.char-desc { font-size: 13px; font-weight: 600; color: var(--lh-muted); }
 .primary-btn {
-  background: #2e7d32; color: #fff; border: none; border-radius: 12px; padding: 12px 26px;
+  background: var(--lh-leaf); color: var(--lh-white); border: none; border-radius: var(--lh-r-btn);
+  padding: var(--lh-s3) 26px;
   font-size: clamp(15px, 2.4vw, 18px); font-weight: 800;
+  transition: transform var(--lh-t-fast) var(--lh-ease), background-color var(--lh-t-fast) var(--lh-ease);
 }
-.primary-btn.secondary { background: #8d7b5f; }
-.controls-hint, .save-note { margin-top: 12px; font-size: clamp(12px, 2vw, 14px); color: #6b5844; }
-.modal { position: absolute; inset: 0; z-index: 15; display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,.5); padding: 12px; }
+.primary-btn:hover { background: var(--lh-leaf-dark); }
+.primary-btn:active { transform: scale(.97); }
+.primary-btn:disabled { opacity: .45; cursor: not-allowed; }
+.primary-btn.secondary { background: var(--lh-stone); }
+.primary-btn.secondary:hover { background: var(--lh-stone-dark); }
+.controls-hint, .save-note { margin-top: var(--lh-s3); font-size: clamp(12px, 2vw, 14px); color: var(--lh-note); }
+.modal {
+  position: absolute; inset: 0; z-index: 15;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(22, 36, 15, .55); padding: var(--lh-s3);
+}
 .modal-panel { max-width: 520px; width: 100%; max-height: 88vh; overflow: auto; }
-.modal-panel h2 { margin-bottom: 12px; color: #2e5d23; }
-.tabs { display: flex; gap: 8px; margin-bottom: 12px; }
-.tab { flex: 1; padding: 10px; border-radius: 10px; border: 2px solid #8a6b3f; background: #fffdf2; font-weight: 800; font-size: 15px; }
-.tab.active { background: #2e7d32; color: #fff; }
+.modal-panel h2 { margin-bottom: var(--lh-s3); color: var(--lh-pine); font-size: clamp(19px, 3.4vw, 24px); }
+.modal-panel > h2 { margin-top: 2px; }
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.modal-panel, .start-panel { animation: panel-in 200ms var(--lh-ease); }
+.tabs { display: flex; gap: var(--lh-s2); margin-bottom: var(--lh-s3); }
+.tab {
+  flex: 1; padding: 10px; border-radius: 10px;
+  border: 2px solid var(--lh-wood); background: var(--lh-paper-2);
+  font-weight: 800; font-size: 15px; color: var(--lh-bark);
+  transition: background-color var(--lh-t-fast) var(--lh-ease), color var(--lh-t-fast) var(--lh-ease);
+}
+.tab.active { background: var(--lh-leaf); color: var(--lh-white); border-color: var(--lh-leaf); }
+/* Baris daftar: flat + hairline, bukan kartu-dalam-kartu. */
 .shop-row, .crop-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  background: #fffdf2; border: 2px solid #d8c08d; border-radius: 12px; padding: 10px 12px; margin-bottom: 8px;
+  background: transparent; border: none;
+  border-bottom: 1px solid var(--lh-hairline); /* taste-skill-ignore: real list rows, hairline is the separator */
+  border-radius: 0;
+  padding: var(--lh-s3) var(--lh-s1);
+  margin-bottom: 0;
 }
-.shop-row .info, .crop-row .info { text-align: left; }
+.shop-row:last-child, .crop-row:last-child { border-bottom: none; }
+.shop-row .info, .crop-row .info { text-align: left; min-width: 0; }
 .shop-row .name, .crop-row .name { font-weight: 800; font-size: 15px; }
-.shop-row .sub, .crop-row .sub { font-size: 13px; color: #7a6547; }
-.buy-btn { background: #ffb340; border: none; border-radius: 10px; padding: 9px 16px; font-weight: 800; white-space: nowrap; }
+.shop-row .sub, .crop-row .sub { font-size: 13px; color: var(--lh-muted); }
+.buy-btn {
+  background: var(--lh-sun); color: var(--lh-ink);
+  border: none; border-radius: 10px; padding: 9px 16px;
+  font-weight: 800; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transition: transform var(--lh-t-fast) var(--lh-ease), opacity var(--lh-t-fast) var(--lh-ease);
+}
+.buy-btn:hover { background: var(--lh-sun-dark); }
+.buy-btn:active { transform: scale(.97); }
 .buy-btn:disabled { opacity: .45; cursor: not-allowed; }
-#shop-coins { font-weight: 800; margin: 10px 0; color: #4a3419; }
-.row-btns { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+#shop-coins { font-weight: 800; margin: 10px 0; color: var(--lh-bark); font-variant-numeric: tabular-nums; }
+.row-btns { display: flex; gap: 10px; margin-top: var(--lh-s3); flex-wrap: wrap; }
 .row-btns .primary-btn { flex: 1; }
-.danger-btn { background: #b3261e; color: #fff; border: none; border-radius: 12px; padding: 12px 18px; font-weight: 800; }
-.modal-panel label { display: flex; justify-content: space-between; align-items: center; gap: 12px;
-  margin-bottom: 12px; font-weight: 700; }
-.modal-panel select { padding: 10px; border-radius: 10px; border: 2px solid #8a6b3f; font-size: 15px; background: #fff; min-height: 44px; }
+.danger-btn {
+  background: var(--lh-danger); color: var(--lh-white); border: none;
+  border-radius: var(--lh-r-btn); padding: var(--lh-s3) 18px; font-weight: 800;
+  transition: transform var(--lh-t-fast) var(--lh-ease), opacity var(--lh-t-fast) var(--lh-ease);
+}
+.danger-btn:active { transform: scale(.97); }
+.modal-panel label {
+  display: flex; justify-content: space-between; align-items: center; gap: var(--lh-s3);
+  margin-bottom: var(--lh-s3); font-weight: 700;
+}
+.modal-panel select {
+  padding: 10px; border-radius: 10px; border: 2px solid var(--lh-wood);
+  font-size: 15px; background: var(--lh-paper-2); color: var(--lh-ink);
+  min-height: 44px; max-width: 60%;
+}
 
 /* ---------- Overlay / toast / error ---------- */
 #orientation-overlay {
-  position: absolute; inset: 0; z-index: 40; background: #16240f; color: #ffe9a8;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; gap: 12px;
+  position: absolute; inset: 0; z-index: 40; background: var(--lh-night); color: var(--lh-cream);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: var(--lh-s6); gap: var(--lh-s3);
 }
-.rotate-icon { font-size: 64px; animation: wiggle 1.6s ease-in-out infinite; }
-@keyframes wiggle { 0%,100% { transform: rotate(-12deg); } 50% { transform: rotate(78deg); } }
-#orientation-overlay h2 { font-size: clamp(19px, 4vw, 26px); }
-#orientation-overlay p { font-size: clamp(14px, 2.6vw, 17px); max-width: 480px; color: #e8f5d8; }
+.rotate-icon { animation: wiggle 1.6s ease-in-out infinite; }
+@keyframes wiggle { 0%, 100% { transform: rotate(-12deg); } 50% { transform: rotate(78deg); } }
+#orientation-overlay h2 { font-size: clamp(19px, 4vw, 26px); color: var(--lh-cream); }
+#orientation-overlay p { font-size: clamp(14px, 2.6vw, 17px); max-width: 480px; color: var(--lh-leaf-soft); }
+.rotate-en { font-size: 13px; opacity: .85; }
 #toast {
   position: absolute; bottom: 200px; left: 50%; transform: translateX(-50%); z-index: 30;
-  background: rgba(20, 30, 16, .88); color: #ffe9a8; padding: 10px 18px; border-radius: 999px;
+  background: var(--lh-paper); color: var(--lh-ink);
+  border: 2px solid var(--lh-wood); border-radius: var(--lh-r-btn);
+  padding: 10px 18px;
   font-weight: 700; font-size: clamp(13px, 2.2vw, 16px); max-width: 88vw; text-align: center;
-  border: 1px solid rgba(255,233,168,.4); pointer-events: none;
+  pointer-events: none;
+  box-shadow: var(--lh-shadow); /* taste-skill-ignore: toast is a real overlay above the game */
 }
 #error-box {
-  position: absolute; top: 10px; left: 10px; right: 10px; z-index: 50; background: #7f1d1d; color: #fff;
-  padding: 12px; border-radius: 10px; font-size: 14px; white-space: pre-wrap;
+  position: absolute; top: 10px; left: 10px; right: 10px; z-index: 50;
+  background: var(--lh-error-bg); color: var(--lh-white);
+  padding: var(--lh-s3); border-radius: 10px; font-size: 14px; white-space: pre-wrap;
 }
 
 /* ---------- Akun (username + PIN) ---------- */
-#auth-panel { background: rgba(255, 253, 242, .85); border: 2px solid #c9b183; border-radius: 14px;
-  padding: 14px; margin-bottom: 16px; text-align: left; }
-#auth-panel h2 { text-align: center; }
-.auth-label { display: flex; justify-content: space-between; align-items: center; gap: 12px;
-  margin-bottom: 8px; font-weight: 700; }
-.auth-label input {
-  padding: 10px 12px; border-radius: 10px; border: 2px solid #8a6b3f; font-size: 16px;
-  background: #fff; min-height: 44px; width: 200px; max-width: 55%;
+/* Bukan kartu-dalam-kartu: hanya pemisah hairline di dalam panel awal. */
+#auth-panel {
+  border-top: 1px solid var(--lh-hairline); /* taste-skill-ignore: form-field separator inside the start panel */
+  border-bottom: 1px solid var(--lh-hairline); /* taste-skill-ignore: form-field separator inside the start panel */
+  padding: 14px 2px;
+  margin-bottom: var(--lh-s4);
+  text-align: left;
 }
-.auth-hint { font-size: 12px; color: #7a6547; margin: 0 0 10px; text-align: center; }
-.auth-error { color: #b3261e; font-weight: 700; font-size: 14px; margin: 6px 0 10px; text-align: center; }
-#btn-auth-submit { width: 100%; margin-bottom: 8px; }
-.link-btn { background: none; border: none; color: #2e5d23; font-weight: 700; font-size: 14px;
-  text-decoration: underline; min-height: 44px; width: 100%; }
-.settings-account { font-weight: 700; color: #4a3419; margin-bottom: 12px; }
+#auth-panel h2 { text-align: center; }
+.auth-label {
+  display: flex; justify-content: space-between; align-items: center; gap: var(--lh-s3);
+  margin-bottom: var(--lh-s2); font-weight: 700;
+}
+.auth-label input {
+  padding: 10px 12px; border-radius: 10px; border: 2px solid var(--lh-wood); font-size: 16px;
+  background: var(--lh-paper-2); color: var(--lh-ink); min-height: 44px; width: 200px; max-width: 55%;
+}
+.auth-label input::placeholder { color: var(--lh-muted); }
+.auth-hint { font-size: 12px; color: var(--lh-muted); margin: 0 0 10px; text-align: center; }
+.auth-error { color: var(--lh-danger); font-weight: 700; font-size: 14px; margin: 6px 0 10px; text-align: center; }
+#btn-auth-submit { width: 100%; margin-bottom: var(--lh-s2); }
+.link-btn {
+  background: none; border: none; color: var(--lh-pine); font-weight: 700; font-size: 14px;
+  text-decoration: underline; text-underline-offset: 3px; min-height: 44px; width: 100%;
+}
+.settings-account { font-weight: 700; color: var(--lh-bark); margin-bottom: var(--lh-s3); }
 
 /* ---------- Kustomisasi karakter ---------- */
 .customize-panel { max-width: 760px; }
-.customize-body { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.customize-body { display: flex; gap: var(--lh-s4); align-items: flex-start; flex-wrap: wrap; }
 .custom-preview-wrap { flex: 0 0 300px; margin: 0 auto; text-align: center; }
-#custom-preview { width: 300px; height: 340px; max-width: 78vw; border-radius: 14px;
-  border: 2px solid #c9b183; background: #f6c98a; display: block; }
-.custom-gender { display: flex; gap: 8px; margin-top: 10px; }
+#custom-preview {
+  width: 300px; height: 340px; max-width: 78vw; border-radius: 14px;
+  border: 2px solid var(--lh-hairline-soft);
+  background: var(--lh-sun-deep);
+  display: block;
+}
+.custom-gender { display: flex; gap: var(--lh-s2); margin-top: 10px; }
 .custom-gender .tab { flex: 1; }
 #custom-options { flex: 1; min-width: 260px; }
-.custom-row { margin-bottom: 12px; }
-.custom-label { font-weight: 800; font-size: 14px; color: #4a3419; margin-bottom: 4px; }
-.custom-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.custom-arrow { min-width: 44px; min-height: 44px; border-radius: 10px; border: 2px solid #8a6b3f;
-  background: #fffdf2; font-size: 20px; font-weight: 800; }
+.custom-row { margin-bottom: var(--lh-s3); }
+.custom-label {
+  font-weight: 800; font-size: 12px; color: var(--lh-bark);
+  margin-bottom: var(--lh-s1);
+  text-transform: uppercase; letter-spacing: .08em;
+}
+.custom-nav { display: flex; align-items: center; gap: var(--lh-s2); margin-bottom: 6px; }
+.custom-arrow {
+  min-width: 44px; min-height: 44px; border-radius: 10px; border: 2px solid var(--lh-wood);
+  background: var(--lh-paper-2); font-size: 20px; font-weight: 800; color: var(--lh-bark);
+  transition: transform var(--lh-t-fast) var(--lh-ease);
+}
+.custom-arrow:active { transform: scale(.97); }
 .custom-model-name { flex: 1; text-align: center; font-weight: 700; }
 .custom-swatches { display: flex; gap: 6px; flex-wrap: wrap; }
-.swatch { width: 32px; height: 32px; min-height: 32px; border-radius: 50%; border: 2px solid rgba(0,0,0,.25); padding: 0; }
-.swatch.selected { border: 3px solid #2e7d32; box-shadow: 0 0 0 2px rgba(46,125,50,.3); }
+/* Hit target 44px; cakram warna di dalam via background-clip, bukan tombol 32px. */
+.swatch {
+  width: 44px; height: 44px; min-height: 44px;
+  border-radius: 50%;
+  border: 2px solid rgba(43, 33, 24, .25);
+  background-clip: padding-box;
+  padding: 5px;
+  transition: transform var(--lh-t-fast) var(--lh-ease);
+}
+.swatch:active { transform: scale(.93); }
+.swatch.selected { border: 2px solid var(--lh-leaf); outline: 2px solid var(--lh-leaf); outline-offset: 2px; }
 
 /* ---------- Small screens / landscape phones ---------- */
 @media (max-width: 700px) {
@@ -168,10 +395,34 @@ button { font-family: inherit; cursor: pointer; min-height: 44px; }
   #joystick { width: 112px; height: 112px; }
   .round-btn { width: 56px; height: 56px; }
   .round-btn.action { width: 68px; height: 68px; }
+  #hud-top { padding: var(--lh-s2); }
+  .hud-btn { padding: var(--lh-s2) 10px; }
+  .panel { padding: var(--lh-s4); }
+  .custom-preview-wrap { flex-basis: 100%; }
+  #custom-preview { margin: 0 auto; }
+}
+@media (max-width: 390px) {
+  #coins-display, #day-display { max-width: 62vw; }
+  .shop-row, .crop-row { flex-wrap: wrap; }
+  .buy-btn { margin-left: auto; }
+  .row-btns .primary-btn, .row-btns .danger-btn { flex: 1 1 100%; }
 }
 @media (max-height: 480px) {
   #inv-bar { display: none; }
   #hint-bar { bottom: 150px; }
   .start-panel { padding: 14px; }
-  .char-emoji { font-size: 32px; }
+  .char-icon .ui-icon { width: 32px; height: 32px; }
+  #custom-preview { width: 220px; height: 250px; }
+  .customize-panel { max-height: 92vh; }
+}
+
+/* ---------- Reduced motion: animasi non-esensial mati, konten tetap terlihat ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .rotate-icon { animation: none; }
+  .modal-panel, .start-panel { animation: none; }
+  *, *::before, *::after {
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

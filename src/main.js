@@ -97,7 +97,7 @@ class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xf6c98a);
+    this.scene.background = null; // langit digambar sky dome di world.js (gradient ikut waktu)
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 400);
     // Posisi awal: tinggi + jauh ke selatan agar frame pembuka memuat kebun,
     // sungai (barat), dan pegunungan (utara) — bukan hamparan rumput kosong.
@@ -225,6 +225,8 @@ class Game {
       this.world.sun.shadow.mapSize.set(cfg.shadowSize, cfg.shadowSize);
       if (this.world.sun.shadow.map) { this.world.sun.shadow.map.dispose(); this.world.sun.shadow.map = null; }
     }
+    // Kualitas rendah mematikan partikel + goyangan rumput di world.
+    this.world?.setQuality?.(q);
     this.scene?.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
     this.save();
   }
@@ -325,7 +327,7 @@ class Game {
     }
     if (!ctx && nearCrate) ctx = { type: 'push', label: t('actionPush', this.state.lang) };
     this._ctx = ctx;
-    this.ui.setActionLabel(ctx ? ctx.label : '✋');
+    this.ui.setActionLabel(ctx ? ctx.label : '');
     this.ui.setHint(ctx ? '' : t('hintNearPlot', this.state.lang));
   }
   doAction() {

@@ -4,6 +4,7 @@
 // innerHTML dari data pemain di mana pun di file ini.
 import * as THREE from 'three';
 import { t, applyI18n } from './i18n.js';
+import { icon } from './icons.js';
 import { CROPS } from './farm.js';
 import { ANIMAL_DEFS } from './animals.js';
 import { buildCharacter } from './player.js';
@@ -20,6 +21,22 @@ function el(tag, cls, text) {
   if (cls) e.className = cls;
   if (text !== undefined) e.textContent = text;
   return e;
+}
+
+// Ubah string SVG statis (ikon milik sendiri, bukan data pemain) jadi elemen.
+function iconEl(name) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = icon(name);
+  return tpl.content.firstElementChild;
+}
+
+// Sisipkan teks dengan penanda {coin}/{sprout} sebagai ikon SVG di posisinya.
+function appendRichText(parent, text) {
+  for (const part of text.split(/(\{coin\}|\{sprout\})/g)) {
+    if (part === '{coin}') parent.appendChild(iconEl('coin'));
+    else if (part === '{sprout}') parent.appendChild(iconEl('sprout'));
+    else if (part) parent.appendChild(document.createTextNode(part));
+  }
 }
 
 // Definisi baris kustomisasi: [kunci model, daftar model, kunci warna, daftar warna, kunci i18n label]
@@ -95,6 +112,7 @@ export class UI {
     this.lang = lang;
     applyI18n(lang);
     $('setting-lang').value = lang;
+    $('btn-jump').setAttribute('aria-label', t('jump', lang));
     if (this._customOptionsBuilt) this._renderCustomOptions();
   }
   showGame(isTouch) {
@@ -113,7 +131,7 @@ export class UI {
     this._toastTimer = setTimeout(() => e.classList.add('hidden'), ms);
   }
   setHint(text) { $('hint-bar').textContent = text || ''; }
-  setActionLabel(text) { $('btn-action').textContent = text || '✋'; }
+  setActionLabel(text) { $('btn-action').textContent = text || ''; }
   updateHUD(state) {
     this._lastState = state;
     $('coins').textContent = state.coins;
@@ -124,14 +142,25 @@ export class UI {
     const bar = $('inv-bar');
     while (bar.firstChild) bar.removeChild(bar.firstChild);
     const inv = state.inv;
-    const add = (emoji, n, label) => {
-      if (n > 0) bar.appendChild(el('span', 'inv-chip', `${emoji} ${label} ×${n}`));
+    const add = (iconName, n, label) => {
+      if (n > 0) {
+        const chip = el('span', 'inv-chip');
+        chip.appendChild(iconEl(iconName));
+        chip.appendChild(document.createTextNode(` ${label} ×${n}`));
+        bar.appendChild(chip);
+      }
     };
-    add('🌱', inv.carrotSeed, 'Wortel'); add('🌱', inv.tomatoSeed, 'Tomat'); add('🌱', inv.pumpkinSeed, 'Labu');
-    add('🌾', inv.feed, t('feed', this.lang));
-    add('🥕', inv.carrot, 'Wortel'); add('🍅', inv.tomato, 'Tomat'); add('🎃', inv.pumpkin, 'Labu');
-    add('🥚', inv.egg, 'Telur'); add('🥛', inv.milk, 'Susu');
-    $('shop-coins').textContent = `🪙 ${state.coins}`;
+    add('sprout', inv.carrotSeed, 'Wortel'); add('sprout', inv.tomatoSeed, 'Tomat'); add('sprout', inv.pumpkinSeed, 'Labu');
+    add('wheat', inv.feed, t('feed', this.lang));
+    add('carrot', inv.carrot, 'Wortel'); add('tomato', inv.tomato, 'Tomat'); add('pumpkin', inv.pumpkin, 'Labu');
+    add('egg', inv.egg, 'Telur'); add('milk', inv.milk, 'Susu');
+    this._setShopCoins(state.coins);
+  }
+  _setShopCoins(n) {
+    const e = $('shop-coins');
+    while (e.firstChild) e.removeChild(e.firstChild);
+    e.appendChild(iconEl('coin'));
+    e.appendChild(document.createTextNode(` ${n}`));
   }
 
   // ---------- Akun ----------
@@ -205,8 +234,10 @@ export class UI {
       if (row.modelKey) {
         const nav = el('div', 'custom-nav');
         const prev = el('button', 'custom-arrow', '‹');
+        prev.setAttribute('aria-label', t('prevModel', this.lang));
         const name = el('span', 'custom-model-name');
         const next = el('button', 'custom-arrow', '›');
+        next.setAttribute('aria-label', t('nextModel', this.lang));
         const models = row.models;
         const curIdx = () => Math.max(0, models.findIndex((m) => m.id === this._custom[row.modelKey]));
         const show = () => { name.textContent = models[curIdx()].label || models[curIdx()].id; };
@@ -248,14 +279,14 @@ export class UI {
       const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0xf6c98a);
+      scene.background = new THREE.Color(0xffe9b8); // krem senja — token kertas/emas, bukan oranye datar
       const camera = new THREE.PerspectiveCamera(40, 300 / 340, 0.1, 100);
       camera.position.set(0, 1.6, 5.2);
       camera.lookAt(0, 1.1, 0);
       const sun = new THREE.DirectionalLight(0xffd9a0, 2.0);
       sun.position.set(3, 6, 4);
       scene.add(sun);
-      scene.add(new THREE.HemisphereLight(0xbfd9ff, 0x6a8f4f, 0.9));
+      scene.add(new THREE.HemisphereLight(0xfff3d6, 0x6a8f4f, 0.9)); // langit krem hangat, tanah lembah
       const ground = new THREE.Mesh(
         new THREE.CylinderGeometry(1.1, 1.3, 0.25, 12),
         new THREE.MeshLambertMaterial({ color: 0x5da244 }),
@@ -303,11 +334,11 @@ export class UI {
     if (this._shopTab === 'buy') {
       const items = [
         ...Object.values(CROPS).map((c) => ({
-          key: c.seedKey, emoji: c.emoji, name: `${t('seeds', this.lang)} ${c.name}`,
-          sub: `${c.days} ${this.lang === 'id' ? 'hari' : 'days'} • ${this.lang === 'id' ? 'jual' : 'sells'} ${c.sell} 🪙`,
+          key: c.seedKey, icon: c.icon, name: `${t('seeds', this.lang)} ${c.name}`,
+          sub: `${c.days} ${this.lang === 'id' ? 'hari' : 'days'} • ${this.lang === 'id' ? 'jual' : 'sells'} ${c.sell} {coin}`,
           price: c.seed, owned: state.inv[c.seedKey] || 0,
         })),
-        { key: 'feed', emoji: '🌾', name: t('feed', this.lang),
+        { key: 'feed', icon: 'wheat', name: t('feed', this.lang),
           sub: this.lang === 'id' ? '1 pakan = 1 ekor/hari' : '1 feed = 1 animal/day',
           price: 2, owned: state.inv.feed || 0 },
       ];
@@ -315,24 +346,30 @@ export class UI {
     } else {
       const items = [
         ...Object.values(CROPS).map((c) => ({
-          key: c.id, emoji: c.emoji, name: c.name, sub: `${c.sell} 🪙 / 1`,
+          key: c.id, icon: c.icon, name: c.name, sub: `${c.sell} {coin} / 1`,
           price: c.sell, owned: state.inv[c.id] || 0,
         })),
-        { key: 'egg', emoji: '🥚', name: ANIMAL_DEFS.ayam.produceName, sub: '8 🪙 / 1', price: 8, owned: state.inv.egg || 0 },
-        { key: 'milk', emoji: '🥛', name: ANIMAL_DEFS.sapi.produceName, sub: '15 🪙 / 1', price: 15, owned: state.inv.milk || 0 },
+        { key: 'egg', icon: 'egg', name: ANIMAL_DEFS.ayam.produceName, sub: '8 {coin} / 1', price: 8, owned: state.inv.egg || 0 },
+        { key: 'milk', icon: 'milk', name: ANIMAL_DEFS.sapi.produceName, sub: '15 {coin} / 1', price: 15, owned: state.inv.milk || 0 },
       ];
       for (const it of items) this._shopRow(box, it, 'sell');
     }
-    $('shop-coins').textContent = `🪙 ${state.coins}`;
+    this._setShopCoins(state.coins);
     $('shop-modal').classList.remove('hidden');
   }
   _shopRow(box, it, mode) {
     const row = el('div', 'shop-row');
     const info = el('div', 'info');
-    info.appendChild(el('div', 'name', `${it.emoji} ${it.name}`));
-    info.appendChild(el('div', 'sub', `${it.sub} • ${this.lang === 'id' ? 'Punya' : 'Owned'}: ${it.owned}`));
+    const nameEl = el('div', 'name');
+    nameEl.appendChild(iconEl(it.icon));
+    nameEl.appendChild(document.createTextNode(` ${it.name}`));
+    info.appendChild(nameEl);
+    const subEl = el('div', 'sub');
+    appendRichText(subEl, `${it.sub} • ${this.lang === 'id' ? 'Punya' : 'Owned'}: ${it.owned}`);
+    info.appendChild(subEl);
     row.appendChild(info);
-    const btn = el('button', 'buy-btn', mode === 'buy' ? `${t('buy', this.lang)} ${it.price} 🪙` : `${t('sell', this.lang)} ${it.price} 🪙`);
+    const btn = el('button', 'buy-btn');
+    appendRichText(btn, mode === 'buy' ? `${t('buy', this.lang)} ${it.price} {coin}` : `${t('sell', this.lang)} ${it.price} {coin}`);
     btn.disabled = mode === 'sell' ? it.owned < 1 : false;
     btn.addEventListener('click', () => {
       if (mode === 'buy') this.h.onBuy(it.key, it.price, it.name);
@@ -351,11 +388,17 @@ export class UI {
       const owned = state.inv[c.seedKey] || 0;
       const row = el('div', 'crop-row');
       const info = el('div', 'info');
-      info.appendChild(el('div', 'name', `${c.emoji} ${c.name}`));
-      info.appendChild(el('div', 'sub',
-        `${c.days} ${this.lang === 'id' ? 'hari' : 'days'} • ${this.lang === 'id' ? 'jual' : 'sell'} ${c.sell} 🪙 • ${this.lang === 'id' ? 'benih' : 'seeds'}: ${owned}`));
+      const nameEl = el('div', 'name');
+      nameEl.appendChild(iconEl(c.icon));
+      nameEl.appendChild(document.createTextNode(` ${c.name}`));
+      info.appendChild(nameEl);
+      const subEl = el('div', 'sub');
+      appendRichText(subEl,
+        `${c.days} ${this.lang === 'id' ? 'hari' : 'days'} • ${this.lang === 'id' ? 'jual' : 'sell'} ${c.sell} {coin} • ${this.lang === 'id' ? 'benih' : 'seeds'}: ${owned}`);
+      info.appendChild(subEl);
       row.appendChild(info);
-      const btn = el('button', 'buy-btn', `${this.lang === 'id' ? 'Tanam' : 'Plant'} 🌱`);
+      const btn = el('button', 'buy-btn');
+      appendRichText(btn, `${this.lang === 'id' ? 'Tanam' : 'Plant'} {sprout}`);
       btn.disabled = owned < 1;
       btn.addEventListener('click', () => { this.closeCropPicker(); onPick(c.id); });
       row.appendChild(btn);

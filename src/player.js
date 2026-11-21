@@ -100,10 +100,96 @@ function addGlasses(g, model, frameC) {
   bridge.position.set(0, 1.9, 0.32); g.add(bridge);
 }
 
+// --- Rig berartikulasi ---
+// Hierarki (semua pose di update() memutar PIVOT, bukan mesh — inilah yang
+// memperbaiki kaki "melayang/berputar" di titik tengahnya):
+//   g (root: posisi dunia + hadap)
+//   ├─ upper (Group: badan+kepala+lengan+rok; bob/napas/condong di sini,
+//   │         kaki TIDAK ikut, supaya telapak tetap menapak di tanah)
+//   │   ├─ body, head, hair, hat, glasses, eyes, overall/vest, skirt
+//   │   └─ armL/armR (pivot bahu, y=1.38)
+//   │        ├─ upperArm (pusat y=-0.16, panjang 0.32)
+//   │        └─ elbowL/elbowR (pivot siku, y=-0.32)
+//   │             ├─ forearm (pusat y=-0.15, panjang 0.30)
+//   │             └─ hand (y=-0.32)
+//   └─ legL/legR (pivot pinggul, y=0.62)
+//        ├─ thigh (pusat y=-0.16, panjang 0.32)
+//        └─ kneeL/kneeR (pivot lutut, y=-0.32 → dunia y=0.30)
+//             ├─ shin (pusat y=-0.15, panjang 0.30)
+//             └─ shoe (child lutut: menempel ujung betis, ikut ayun+tekuk)
+// Konvensi rotation.x (maju lokal = +Z): negatif = ayun ke depan,
+// positif = ayun ke belakang; lutut positif = betis menekuk ke belakang.
+const HIP_Y = 0.62, THIGH_LEN = 0.32, SHIN_LEN = 0.30;
+const SHOULDER_Y = 1.38, UPPER_ARM_LEN = 0.32, FOREARM_LEN = 0.30;
+
+function pivot(x, y, z) {
+  const p = new THREE.Group();
+  p.position.set(x, y, z);
+  return p;
+}
+
+function seg(geo, material, y) {
+  const m = new THREE.Mesh(geo, material);
+  m.position.y = y;
+  m.castShadow = true;
+  return m;
+}
+
+// Sepatu sebagai child pivot lutut: sol selalu di ujung betis, apa pun
+// ayunan paha / tekukan lututnya. Bentuk per model tetap dipertahankan.
+function addShoe(knee, model, shoesMat) {
+  const shoe = new THREE.Group();
+  shoe.position.z = 0.06; // ujung kaki mengarah ke depan (+Z)
+  if (model === 'boots') {
+    shoe.add(seg(new THREE.BoxGeometry(0.22, 0.14, 0.44), shoesMat, -0.23));
+    // Batang bot menutupi pergelangan / betis bawah.
+    shoe.add(seg(new THREE.CylinderGeometry(0.13, 0.14, 0.2, 6), shoesMat, -0.2));
+  } else if (model === 'sandals') {
+    shoe.add(seg(new THREE.BoxGeometry(0.2, 0.08, 0.42), shoesMat, -0.26));
+    const strap = seg(new THREE.BoxGeometry(0.2, 0.03, 0.09), shoesMat, -0.21);
+    strap.position.z = 0.1;
+    shoe.add(strap);
+  } else { // sneakers
+    shoe.add(seg(new THREE.BoxGeometry(0.22, 0.14, 0.44), shoesMat, -0.23));
+  }
+  knee.add(shoe);
+  return shoe;
+}
+
+function buildLeg(side, pantsModel, pantsMat, skinMat, shoesModel, shoesMat) {
+  const hip = pivot(side * 0.18, HIP_Y, 0);
+  if (pantsModel === 'shorts') {
+    // Celana pendek: paha atas warna celana, sisanya kulit sampai lutut.
+    hip.add(seg(new THREE.CylinderGeometry(0.125, 0.12, 0.2, 6), pantsMat, -0.1));
+    hip.add(seg(new THREE.CylinderGeometry(0.11, 0.105, 0.12, 6), skinMat, -0.26));
+  } else {
+    hip.add(seg(new THREE.CylinderGeometry(0.12, 0.11, THIGH_LEN, 6), pantsMat, -THIGH_LEN / 2));
+  }
+  const knee = pivot(0, -THIGH_LEN, 0);
+  hip.add(knee);
+  // Betis: kulit bila shorts, warna celana bila pants/skirt (seperti semula).
+  const shinMat = pantsModel === 'shorts' ? skinMat : pantsMat;
+  knee.add(seg(new THREE.CylinderGeometry(0.11, 0.1, SHIN_LEN, 6), shinMat, -SHIN_LEN / 2));
+  const shoe = addShoe(knee, shoesModel, shoesMat);
+  return { hip, knee, shoe };
+}
+
+function buildArm(side, shirtModel, shirtMat, skinMat) {
+  const shoulder = pivot(side * 0.48, SHOULDER_Y, 0);
+  shoulder.rotation.z = side * 0.07; // lengan sedikit menjauh dari badan
+  shoulder.add(seg(new THREE.CylinderGeometry(0.1, 0.09, UPPER_ARM_LEN, 6), shirtMat, -UPPER_ARM_LEN / 2));
+  const elbow = pivot(0, -UPPER_ARM_LEN, 0);
+  shoulder.add(elbow);
+  // Lengan panjang = baju sampai tangan; kaos/overall/vest = lengan bawah kulit.
+  const foreMat = shirtModel === 'long' ? shirtMat : skinMat;
+  elbow.add(seg(new THREE.CylinderGeometry(0.09, 0.08, FOREARM_LEN, 6), foreMat, -FOREARM_LEN / 2));
+  elbow.add(seg(new THREE.SphereGeometry(0.09, 8, 6), skinMat, -FOREARM_LEN - 0.02));
+  return { shoulder, elbow };
+}
+
 // Membangun model low-poly dari gender + kustomisasi (model + warna).
 export function buildCharacter(gender, customInput) {
   const g = new THREE.Group();
-  const female = gender === 'female';
   const c = sanitizeCustom(customInput, gender);
   const skin = hexOf(SKIN_TONES, c.skin, '#e8b88a');
   const shirt = hexOf(PALETTE, c.shirtColor, '#3f7d3a');
@@ -112,65 +198,60 @@ export function buildCharacter(gender, customInput) {
   const hatC = hexOf(PALETTE, c.hatColor, '#d8b36a');
   const frameC = hexOf(FRAME_COLORS, c.glassesColor, '#1a1a1a');
   const shoesC = hexOf(PALETTE, c.shoesColor, '#6e4a26');
+  const skinMat = mat(skin), shirtMat = mat(shirt), pantsMat = mat(pants);
 
-  // Badan — model atasan menentukan bentuk.
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 0.85, 8), mat(shirt));
-  body.position.y = 1.05; body.castShadow = true; g.add(body);
+  // Badan + kepala + aksesori: satu grup "upper" supaya bob/napas/condong
+  // menggerakkan torso utuh (dulu body saja yang naik-turun, kepala diam).
+  const upper = new THREE.Group();
+  g.add(upper);
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 0.85, 8), shirtMat);
+  body.position.y = 1.05; body.castShadow = true; upper.add(body);
   if (c.shirtModel === 'overall') {
     // Overall: tali bahu + dada warna celana.
     for (const sx of [-0.16, 0.16]) {
-      const strap = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.5, 0.05), mat(pants));
-      strap.position.set(sx, 1.35, 0.36); g.add(strap);
+      const strap = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.5, 0.05), pantsMat);
+      strap.position.set(sx, 1.35, 0.36); upper.add(strap);
     }
-    const bib = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.35, 0.06), mat(pants));
-    bib.position.set(0, 1.2, 0.36); g.add(bib);
+    const bib = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.35, 0.06), pantsMat);
+    bib.position.set(0, 1.2, 0.36); upper.add(bib);
   } else if (c.shirtModel === 'vest') {
-    const vest = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.6, 0.1), mat(pants));
-    vest.position.set(0, 1.1, 0.36); g.add(vest);
+    const vest = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.6, 0.1), pantsMat);
+    vest.position.set(0, 1.1, 0.36); upper.add(vest);
   }
   // Kepala + rambut + topi + kacamata.
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 10), mat(skin));
-  head.position.y = 1.85; head.castShadow = true; g.add(head);
-  addHair(g, c.hairStyle, hairC, mat(skin));
-  addHat(g, c.hatModel, hatC);
-  addGlasses(g, c.glassesModel, frameC);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 10), skinMat);
+  head.position.y = 1.85; head.castShadow = true; upper.add(head);
+  addHair(upper, c.hairStyle, hairC, skinMat);
+  addHat(upper, c.hatModel, hatC);
+  addGlasses(upper, c.glassesModel, frameC);
   // Mata.
   const eyeMat = mat(0x1a1a1a);
   for (const ex of [-0.13, 0.13]) {
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 6), eyeMat);
-    eye.position.set(ex, 1.88, 0.3); g.add(eye);
+    eye.position.set(ex, 1.88, 0.3); upper.add(eye);
   }
-  // Lengan (lengan panjang = warna baju sampai tangan; kaos = lengan kulit bawah).
-  const armMat = c.shirtModel === 'long' ? mat(shirt) : mat(shirt);
-  const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.09, 0.62, 6), armMat);
-  armL.position.set(-0.48, 1.05, 0); armL.castShadow = true; g.add(armL);
-  const armR = armL.clone(); armR.position.x = 0.48; g.add(armR);
-  // Kaki — model celana menentukan bentuk.
-  const legLen = c.pantsModel === 'shorts' ? 0.32 : 0.6;
-  const legY = c.pantsModel === 'shorts' ? 0.46 : 0.32;
-  const legL = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.11, legLen, 6), mat(pants));
-  legL.position.set(-0.18, legY, 0); g.add(legL);
-  const legR = legL.clone(); legR.position.x = 0.18; g.add(legR);
-  if (c.pantsModel === 'shorts') {
-    // Betis kulit di bawah celana pendek.
-    for (const lx of [-0.18, 0.18]) {
-      const calf = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.09, 0.3, 6), mat(skin));
-      calf.position.set(lx, 0.16, 0); g.add(calf);
-    }
+  // Lengan berartikulasi (bahu + siku).
+  const armL = buildArm(-1, c.shirtModel, shirtMat, skinMat);
+  const armR = buildArm(1, c.shirtModel, shirtMat, skinMat);
+  upper.add(armL.shoulder); upper.add(armR.shoulder);
+  // Kaki berartikulasi (pinggul + lutut + sepatu menempel betis).
+  const shoesMat = mat(shoesC);
+  const legL = buildLeg(-1, c.pantsModel, pantsMat, skinMat, c.shoesModel, shoesMat);
+  const legR = buildLeg(1, c.pantsModel, pantsMat, skinMat, c.shoesModel, shoesMat);
+  g.add(legL.hip); g.add(legR.hip);
+  if (c.pantsModel === 'skirt') {
+    // Rok menempel torso (ikut bob), kaki tetap berayun di bawahnya.
+    const skirt = new THREE.Mesh(new THREE.ConeGeometry(0.55, 0.7, 8), pantsMat);
+    skirt.position.y = 0.5; upper.add(skirt);
   }
-  if (c.pantsModel === 'skirt' || (female && c.pantsModel === 'skirt')) {
-    const skirt = new THREE.Mesh(new THREE.ConeGeometry(0.55, 0.7, 8), mat(pants));
-    skirt.position.y = 0.5; g.add(skirt);
-  }
-  // Sepatu.
-  const shoeGeo = c.shoesModel === 'sandals'
-    ? new THREE.BoxGeometry(0.2, 0.08, 0.42)
-    : new THREE.BoxGeometry(0.22, 0.14, 0.44);
-  for (const lx of [-0.18, 0.18]) {
-    const shoe = new THREE.Mesh(shoeGeo, mat(shoesC));
-    shoe.position.set(lx, 0.07, 0.06); shoe.castShadow = true; g.add(shoe);
-  }
-  g.userData = { armL, armR, legL, legR, body };
+  g.userData = {
+    armL: armL.shoulder, armR: armR.shoulder,
+    legL: legL.hip, legR: legR.hip,
+    body, head, upper,
+    elbowL: armL.elbow, elbowR: armR.elbow,
+    kneeL: legL.knee, kneeR: legR.knee,
+    shoeL: legL.shoe, shoeR: legR.shoe,
+  };
   g.userData.custom = c;
   return g;
 }
@@ -186,6 +267,11 @@ export class Player {
     this.facing = 0;
     this.moving = false;
     this.walkPhase = 0;
+    this.walkAmp = 0;    // amplitudo jalan terhaluskan: 0 diam → 1 lari
+    this.airBlend = 0;   // 0 menapak → 1 melayang (pose lompat)
+    this.breathPhase = 0;
+    this.landDip = 0;    // crouch sesaat setelah mendarat (meluruh)
+    this._wasAir = false;
     this.group = buildCharacter(gender, this.custom);
     this.group.position.set(x, terrainHeight(x, z), z);
     scene.add(this.group);
@@ -213,6 +299,7 @@ export class Player {
   teleport(x, z) {
     this.x = clamp(x, -78, 78); this.z = clamp(z, -78, 78);
     this.vx = 0; this.vz = 0; this.yOff = 0; this.vy = 0;
+    this._wasAir = false; this.landDip = 0;
     this.group.position.set(this.x, this.y, this.z);
   }
   jump() {
@@ -254,19 +341,65 @@ export class Player {
     this.x = clamp(nx, -78, 78);
     this.z = clamp(nz2, -78, 78);
     // Gravitasi + lompat.
+    const wasAir = this._wasAir;
     if (this.yOff > 0 || this.vy > 0) {
       this.vy -= GRAVITY * dt;
       this.yOff += this.vy * dt;
       if (this.yOff <= 0) { this.yOff = 0; this.vy = 0; }
     }
-    // Pose + animasi jalan.
+    // Baru mendarat (sebelumnya di udara, kini menapak): picu crouch.
+    if (wasAir && this.yOff === 0 && this.vy === 0) this.landDip = 1;
+    this._wasAir = this.yOff > 0.01 || this.vy > 0;
+    // Pose + animasi jalan (rig berartikulasi — lihat buildCharacter).
+    // Konvensi rotation.x: negatif = ayun ke depan, positif = ke belakang;
+    // lutut positif = betis menekuk ke belakang.
     const sp = Math.hypot(this.vx, this.vz);
-    this.walkPhase += dt * sp * 2.2;
-    const s = Math.sin(this.walkPhase) * clamp(sp / MAX_SPEED, 0, 1) * 0.6;
+    const speedF = clamp(sp / MAX_SPEED, 0, 1);
+    const airborne = this.yOff > 0.01 || this.vy > 0;
+    // Fase jalan berbasis JARAK tempuh, bukan waktu mentah: panjang
+    // langkah tumbuh dengan kecepatan (0.45 m pelan → ~1.1 m saat lari);
+    // satu siklus penuh (2π) = 2 langkah. Fase membeku saat melayang.
+    if (!airborne && sp > 0.05) {
+      const stepLen = 0.45 + 0.11 * sp;
+      this.walkPhase += (sp * dt * Math.PI) / stepLen;
+    }
+    // Amplitudo jalan + blend udara dihaluskan → transisi jalan↔diam
+    // dan tanah↔udara tanpa lompatan pose.
+    this.walkAmp += ((airborne ? 0 : speedF) - this.walkAmp) * Math.min(1, dt * 8);
+    this.airBlend += ((airborne ? 1 : 0) - this.airBlend) * Math.min(1, dt * 10);
+    this.breathPhase += dt * 1.6; // napas: ~1 tarikan per 4 detik
+    this.landDip *= Math.exp(-dt * 4);
+    const amp = this.walkAmp, ab = this.airBlend;
+    const ph = this.walkPhase;
+    const sinP = Math.sin(ph), cosP = Math.cos(ph);
+    const breath = Math.sin(this.breathPhase);
+    // --- Pose menapak: jalan (diskala amp) + idle napas (diskala 1-amp).
+    // Kaki ayun berlawanan fase; lutut menekuk saat kaki terangkat
+    // (cos > 0: paha melewati vertikal ke depan) & lurus saat menapak.
+    const legLxW = -0.55 * amp * sinP;
+    const legRxW = 0.55 * amp * sinP;
+    const kneeLxW = (0.08 + 0.95 * Math.max(0, cosP)) * amp;
+    const kneeRxW = (0.08 + 0.95 * Math.max(0, -cosP)) * amp;
+    const armLxW = 0.5 * amp * sinP;   // lengan lawan kaki se-sisi
+    const armRxW = -0.5 * amp * sinP;
+    const elbLxW = -(0.15 + 0.3 * amp * Math.max(0, -sinP));
+    const elbRxW = -(0.15 + 0.3 * amp * Math.max(0, sinP));
+    const bobW = 0.045 * amp * Math.abs(sinP); // bob 2x frekuensi langkah
+    const leanW = 0.02 + 0.08 * speedF;        // condong ∝ kecepatan
+    const swayW = 0.03 * amp * sinP;           // goyang berat badan
     const u = this.group.userData;
-    u.legL.rotation.x = s; u.legR.rotation.x = -s;
-    u.armL.rotation.x = -s * 0.8; u.armR.rotation.x = s * 0.8;
-    u.body.position.y = 1.05 + Math.abs(Math.sin(this.walkPhase)) * 0.05 * clamp(sp / MAX_SPEED, 0, 1);
+    const L = (w, a) => (1 - ab) * w + ab * a; // blend menapak ↔ udara
+    u.legL.rotation.x = L(legLxW, -0.35);
+    u.legR.rotation.x = L(legRxW, 0.25);
+    u.kneeL.rotation.x = L(kneeLxW, 0.55) + 0.35 * this.landDip * (1 - ab);
+    u.kneeR.rotation.x = L(kneeRxW, 0.85) + 0.35 * this.landDip * (1 - ab);
+    u.armL.rotation.x = L(armLxW + (1 - amp) * (0.04 + 0.02 * breath), -0.45);
+    u.armR.rotation.x = L(armRxW + (1 - amp) * (0.04 + 0.02 * breath), -0.45);
+    u.elbowL.rotation.x = L(elbLxW, -0.5);
+    u.elbowR.rotation.x = L(elbRxW, -0.5);
+    u.upper.position.y = (1 - ab) * (bobW + 0.012 * breath * (1 - amp) - 0.05 * this.landDip);
+    u.upper.rotation.x = L(leanW, 0.06);
+    u.upper.rotation.z = (1 - ab) * swayW;
     this.group.position.set(this.x, this.y, this.z);
     // Hadap arah gerak (lerp sudut).
     let df = this.facing - this.group.rotation.y;
