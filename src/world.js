@@ -1,7 +1,8 @@
 // world.js — lembah pastoral low-poly: terrain, pegunungan, sungai mengalir,
 // jembatan kayu, rumah, kios toko, kandang, jalan tanah, pohon (instanced), pagar.
 import * as THREE from 'three';
-import { terrainHeight, riverCenterX, RIVER_HALF, BRIDGE_Z, WATER_Y, noise2, smoothstep,
+import { terrainHeight, riverCenterX, RIVER_HALF, BRIDGE_Z, BRIDGE_DECK_Y, BRIDGE_RAMP_LEN,
+         BRIDGE_DECK_MIN_X, BRIDGE_DECK_MAX_X, BRIDGE_WALK_HALF, WATER_Y, noise2, smoothstep,
          LAKE, WINDMILL, MEADOW, ORCHARD, SQUARE } from './physics.js';
 
 export const FARM_ORIGIN = { x: 12, z: 4 };
@@ -247,17 +248,41 @@ export function buildWorld(scene) {
   }
   group.add(foam);
 
-  // ---- Jembatan kayu (papan + tiang + tali)
+  // ---- Jembatan kayu (papan + tiang + tali + tanjakan)
+  // Deck 0.65 (0.2 di atas air 0.45) + tanjakan landai di kedua ujung yang
+  // menyambung ke terrain tepi — sinkron dengan bridgeHeight() di physics.js
+  // (pijakan pemain = permukaan papan). Dulu deck y=1.0 tanpa tanjakan.
   const bridge = new THREE.Group();
   const plankMat = mat(0x9a6b3f), postMat = mat(0x6e4a26);
   for (let i = 0; i < 9; i++) {
     const plank = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.18, 1.5), plankMat);
-    plank.position.set(-24 + (i - 4) * 1.55, 1.0, BRIDGE_Z);
+    plank.position.set(-24 + (i - 4) * 1.55, BRIDGE_DECK_Y - 0.09, BRIDGE_Z);
     plank.castShadow = true; bridge.add(plank);
   }
-  for (const [px, pz] of [[-30.5, BRIDGE_Z - 2], [-30.5, BRIDGE_Z + 2], [-17.5, BRIDGE_Z - 2], [-17.5, BRIDGE_Z + 2]]) {
+  // Tanjakan: papan miring dari deck ke terrain tepi (kemiringan ~0.2).
+  const bankW = terrainHeight(BRIDGE_DECK_MIN_X - BRIDGE_RAMP_LEN, BRIDGE_Z);
+  const bankE = terrainHeight(BRIDGE_DECK_MAX_X + BRIDGE_RAMP_LEN, BRIDGE_Z);
+  const rampLen = Math.hypot(BRIDGE_RAMP_LEN, BRIDGE_DECK_Y - bankW) + 0.3;
+  for (const [cx, bank, sgn] of [
+    [BRIDGE_DECK_MIN_X - BRIDGE_RAMP_LEN / 2, bankW, 1],   // barat, naik ke timur
+    [BRIDGE_DECK_MAX_X + BRIDGE_RAMP_LEN / 2, bankE, -1],  // timur, naik ke barat
+  ]) {
+    const ramp = new THREE.Mesh(new THREE.BoxGeometry(rampLen, 0.12, BRIDGE_WALK_HALF * 2 + 0.2), plankMat);
+    ramp.position.set(cx, (bank + BRIDGE_DECK_Y) / 2, BRIDGE_Z);
+    ramp.rotation.z = sgn * Math.atan2(BRIDGE_DECK_Y - bank, BRIDGE_RAMP_LEN);
+    ramp.castShadow = true; bridge.add(ramp);
+  }
+  // Tiang + tali di tepi papan (z = BRIDGE_Z ± 1.0, tepat di luar papan 1.5).
+  for (const [px, pz] of [[-30.5, BRIDGE_Z - 1], [-30.5, BRIDGE_Z + 1], [-17.5, BRIDGE_Z - 1], [-17.5, BRIDGE_Z + 1]]) {
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 1.6, 6), postMat);
-    post.position.set(px, 1.4, pz); bridge.add(post);
+    post.position.set(px, BRIDGE_DECK_Y + 0.8, pz); bridge.add(post);
+  }
+  for (const pz of [BRIDGE_Z - 1, BRIDGE_Z + 1]) {
+    for (const py of [BRIDGE_DECK_Y + 0.5, BRIDGE_DECK_Y + 0.9]) {
+      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 13, 5), postMat);
+      rail.rotation.z = Math.PI / 2;
+      rail.position.set(-24, py, pz); bridge.add(rail);
+    }
   }
   group.add(bridge);
 

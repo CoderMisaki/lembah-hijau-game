@@ -737,17 +737,22 @@ class Game {
     return { day: this.state.day, grown, eggs: prod.eggs, milk: prod.milk };
   }
   // Jalan otomatis menuju (tx, tz) dengan vektor sintetis. Colliders kosong
-  // supaya pemain bisa melewati pintu (dinding rumah = collider). Kembalikan
-  // jarak sisa. Konversi dunia→ruang kamera = kebalikan rotasi yaw (matriks
-  // rotasi di loop() adalah involusi: R² = I).
+  // supaya pemain bisa melewati pintu (dinding rumah = collider).
+  // player.update memetakan (x, y) -> dunia (x, -y) TANPA rotasi yaw — jadi
+  // arah dunia diteruskan langsung: x = wx, y = -wz. (Versi lama memutar
+  // vektor sebesar yaw orbit — padahal player.update tidak menerapkan
+  // rotasi itu — sehingga pada yaw != 0 kecepatan jalan terotasi sebesar
+  // yaw: yaw ~90° pemain mengorbit pintu, yaw 180° pemain jalan MENJAUH
+  // dari pintu. Terukur headless: yaw=1.2 sudut gerak 51° dari target,
+  // yaw=PI sudut 180°, jarak ke pintu 3.12 -> 6.05 m.)
+  // mag mengecil saat mendekat supaya tidak overshoot melewati waypoint.
   _autoWalkToward(tx, tz, dt) {
     const dx = tx - this.player.x, dz = tz - this.player.z;
     const d = Math.hypot(dx, dz);
     if (d < 0.05) { this.player.update(dt, { x: 0, y: 0, mag: 0 }, [], false); return d; }
     const wx = dx / d, wz = dz / d; // arah dunia ternormalisasi
-    const yaw = this.input.orbit.yaw;
-    const cy = Math.cos(yaw), sy = Math.sin(yaw);
-    this.player.update(dt, { x: wx * cy - wz * sy, y: -wx * sy - wz * cy, mag: 1 }, [], false);
+    const mag = Math.max(0.3, Math.min(1, d / 1.5));
+    this.player.update(dt, { x: wx, y: -wz, mag }, [], false);
     return d;
   }
   _updateSleep(now, dt) {

@@ -34,6 +34,28 @@ export function riverCenterX(z) { return -24 + 4 * Math.sin(z * 0.05); }
 export const RIVER_HALF = 3.4;
 export const BRIDGE_Z = 6;      // jembatan kayu di z = 6
 export const BRIDGE_HALF = 2.4; // lebar jembatan (sumbu z)
+export const BRIDGE_DECK_Y = 0.65; // permukaan jalan papan jembatan (di atas air 0.45)
+export const BRIDGE_RAMP_LEN = 3.3; // panjang tanjakan tiap ujung jembatan (sumbu x)
+export const BRIDGE_DECK_MIN_X = -30.2, BRIDGE_DECK_MAX_X = -17.8; // bentang papan
+export const BRIDGE_WALK_HALF = 0.9; // setengah lebar jalan kaki di atas papan (papan 1.5 + margin 0.15)
+
+// Tinggi pijakan di koridor jembatan: tanjakan landai -> deck -> tanjakan.
+// Di luar koridor mengembalikan terrainHeight, jadi sambungan ke daratan
+// kontinu (tanpa lompatan): di ujung tanjakan tingginya persis terrain.
+// (Deck lama y=1.0 tanpa tanjakan: pemain melompat ~1.7 m dari tepi ke deck.)
+export function bridgeHeight(x, z) {
+  if (Math.abs(z - BRIDGE_Z) >= BRIDGE_WALK_HALF) return terrainHeight(x, z);
+  if (x >= BRIDGE_DECK_MIN_X && x <= BRIDGE_DECK_MAX_X) return BRIDGE_DECK_Y;
+  if (x > BRIDGE_DECK_MAX_X && x <= BRIDGE_DECK_MAX_X + BRIDGE_RAMP_LEN) {
+    const t = (x - BRIDGE_DECK_MAX_X) / BRIDGE_RAMP_LEN; // 0 deck -> 1 tepi
+    return BRIDGE_DECK_Y + (terrainHeight(BRIDGE_DECK_MAX_X + BRIDGE_RAMP_LEN, z) - BRIDGE_DECK_Y) * t;
+  }
+  if (x < BRIDGE_DECK_MIN_X && x >= BRIDGE_DECK_MIN_X - BRIDGE_RAMP_LEN) {
+    const t = (BRIDGE_DECK_MIN_X - x) / BRIDGE_RAMP_LEN;
+    return BRIDGE_DECK_Y + (terrainHeight(BRIDGE_DECK_MIN_X - BRIDGE_RAMP_LEN, z) - BRIDGE_DECK_Y) * t;
+  }
+  return terrainHeight(x, z);
+}
 
 export const WATER_Y = 0.45; // permukaan air sungai (sinkron dengan world.js)
 export function waterDepth(x, z) { return WATER_Y - terrainHeight(x, z); }

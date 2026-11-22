@@ -5,7 +5,7 @@
 // model + warna per kategori — semua geometri prosedural Three.js, low-poly.
 import * as THREE from 'three';
 import { GRAVITY, JUMP_VELOCITY, MAX_SPEED, ACCEL, FRICTION, clamp, PLAY_BOUND,
-         terrainHeight, resolveCircleVsAABBs, isInRiver, isOnBridge, waterDepth, WATER_Y } from './physics.js';
+         terrainHeight, resolveCircleVsAABBs, isInRiver, isOnBridge, waterDepth, WATER_Y, bridgeHeight } from './physics.js';
 import { defaultCustom, sanitizeCustom, hexOf,
          SKIN_TONES, HAIR_COLORS, PALETTE, FRAME_COLORS } from './customization.js';
 
@@ -291,7 +291,10 @@ export class Player {
     scene.add(this.group);
   }
   // Tanah di bawah kaki: papan jembatan (y=1.0) saat di atas jembatan, terrain biasa jika tidak.
-  groundAt(x, z) { return isOnBridge(x, z) ? 1.0 : terrainHeight(x, z); }
+  // Tanah di bawah kaki: tanjakan + deck jembatan bila di koridornya,
+  // terrain biasa bila di luar (bridgeHeight mengembalikan terrain di luar
+  // koridor, jadi sambungan ke daratan kontinu).
+  groundAt(x, z) { return bridgeHeight(x, z); }
   get y() { return this.groundAt(this.x, this.z) + this.yOff; }
   setGender(scene, gender) {
     if (gender === this.gender) return;

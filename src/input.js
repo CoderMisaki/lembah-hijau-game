@@ -82,8 +82,22 @@ export class Input {
     const act = document.getElementById('btn-action');
     const jmp = document.getElementById('btn-jump');
     const run = document.getElementById('btn-run');
-    if (act) act.addEventListener('click', () => { if (this.onAction && !this.locked) this.onAction(); });
-    if (jmp) jmp.addEventListener('click', () => { if (this.onJump && !this.locked) this.onJump(); });
+    // Lompat/Aksi: pointerdown, BUKAN click — click TIDAK fire saat jari lain
+    // sedang menahan joystick (multi-touch): diuji headless, tap Lompat saat
+    // joystick ditahan menghasilkan clicks=0 padahal pointerdown=1 dan
+    // pemain tidak lompat (yOff 0.00); saat diam clicks=1, lompat OK.
+    // pointerdown fire saat sentuhan dimulai, apa pun jari lain sedang apa.
+    // preventDefault menekan click emulasi supaya tidak double-fire.
+    const press = (el, fn) => {
+      if (!el) return;
+      el.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.preventDefault();
+        if (fn && !this.locked) fn();
+      });
+    };
+    press(act, () => this.onAction && this.onAction());
+    press(jmp, () => this.onJump && this.onJump());
     // Tombol Lari: TAHAN (bukan klik) — sentuh/mouse down = lari, lepas = jalan.
     if (run) {
       const on = (e) => { e.preventDefault(); this.running = true; run.classList.add('active'); };
