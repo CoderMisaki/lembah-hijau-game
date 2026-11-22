@@ -86,6 +86,11 @@ class Game {
     this._fpsAccum = 0; this._fpsFrames = 0; this._lowFpsTime = 0; this._lastDegrade = 0;
     this._saveTimer = 0;
     this._pendingCropPlot = null;
+    // Urutan tidur sinematik: sleeping + sleepPhase diekspos ke window.__LH_GAME
+    // untuk verifikasi headless. _sleep = { t0, phase, phaseT0, advanced, ... }.
+    this.sleeping = false;
+    this.sleepPhase = null;
+    this._sleep = null;
     this._isTouch = window.matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
     this._orientationLocked = false;
     this.sfx = new Sfx();
@@ -106,6 +111,9 @@ class Game {
     this.camera.position.set(6, 16, 42);
 
     this.world = buildWorld(this.scene);
+    // Geometri jauh (pegunungan) butuh far ini; langit aman via trik sky dome.
+    this.camera.far = this.world.view.camFar;
+    this.camera.updateProjectionMatrix();
     this.player = new Player(this.scene, this.state.gender, this.state.playerX, this.state.playerZ, this.state.custom);
     this.farm = new Farm(this.scene, this.state.plots);
     this.animals = new Animals(this.scene, this.state.animals);
@@ -132,6 +140,12 @@ class Game {
       onOffline: () => this.enterOfflineMode(),
       onLogout: () => this.handleLogout(),
       onDeleteServerSave: () => this.deleteServerSave(),
+      // Minimap: posisi + arah pemain live, data peta dari world (robustness
+      // atas fallback window.__LH_GAME yang sudah ada di ui.js).
+      getMinimap: () => ({
+        player: { x: this.player.x, z: this.player.z, facing: this.player.facing },
+        data: this.world.minimapData,
+      }),
     });
     this.ui.setLang(this.state.lang);
     this.ui.setAuthState(this.session ? this.session.username : null);
@@ -145,7 +159,14 @@ class Game {
 
     window.addEventListener('resize', () => this.onResize());
     window.addEventListener('orientationchange', () => setTimeout(() => this.checkOrientation(), 300));
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.checkOrientation(); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) return;
+      this.checkOrientation();
+      // Tab kembali terlihat di tengah urutan tidur: fase dihitung dari
+      // wall-clock, jadi satu tick langsung melompat ke fase yang benar
+      // (atau menyelesaikan urutan) — tidak pernah softlock.
+      if (this.sleeping) this._updateSleep(performance.now(), 0.016);
+    });
 
     attachDebug(this);
     this.clock = new THREE.Clock();
@@ -260,49 +281,80 @@ class Game {
     const dt = Math.min(rawDt, 0.05); // clamp hanya untuk fisika; FPS diukur dari waktu nyata
     const t = this.clock.elapsedTime;
     if (this.started) {
-      // Waktu berjalan; mentok 22:00 sampai tidur.
-      if (this.state.minutes < DAY_END) {
-        this.state.minutes = Math.min(DAY_END, this.state.minutes + MIN_PER_SEC * dt);
+      if (this.sleeping) {
+        // Urutan tidur: jam dibekukan, interaksi + autosave dijeda — pemain
+        // sedang tidur, dunia menunggu. Hewan/dunia visual tetap jalan.
+        this._updateSleep(performance.now(), dt);
+        this.animals.update(dt, t);
+      } else {
+        // Waktu berjalan; mentok 22:00 sampai tidur.
+        if (this.state.minutes < DAY_END) {
+          this.state.minutes = Math.min(DAY_END, this.state.minutes + MIN_PER_SEC * dt);
+        }
+        // Gerak mengikuti yaw kamera: putar vektor move sebesar yaw. yaw=0
+        // identik dengan perilaku lama (maju=-Z, kanan=+X). Turunan: maju
+        // layar = (-sin yaw, -cos yaw), kanan layar = (cos yaw, -sin yaw);
+        // player.update memetakan (x, y) -> dunia (x, -y).
+        const mv = this.input.moveVector();
+        const yaw = this.input.orbit.yaw;
+        const cy = Math.cos(yaw), sy = Math.sin(yaw);
+        const rmv = { x: mv.x * cy - mv.y * sy, y: mv.x * sy + mv.y * cy, mag: mv.mag };
+        this.player.update(dt, rmv, this.world.colliders, this.input.running);
+        // Peti: dorong bila bersentuhan.
+        const crate = this.crate;
+        const dx = crate.x - this.player.x, dz = crate.z - this.player.z;
+        if (Math.hypot(dx, dz) < crate.half + 0.7) {
+          crate.pushFrom(this.player.x, this.player.z, this.player.vx, this.player.vz);
+        }
+        crate.update(dt, this.world.colliders);
+        this.world.crate.position.set(crate.x, crate.y + 0.7, crate.z);
+        this.world.crate.rotation.y += (Math.hypot(crate.vx, crate.vz) * dt) * 0.4;
+        this.animals.update(dt, t);
+        this.updateInteraction();
+        // Suara air: penuh di tepi sungai, memudar sampai hilang ~22 m.
+        const dRiver = riverDistance(this.player.x, this.player.z);
+        const wl = dRiver <= 0 ? 1 : 1 - smoothstep(3, 22, dRiver);
+        if (Math.abs(wl - this._waterLevel) > 0.02) { this._waterLevel = wl; this.sfx.setWaterLevel(wl); }
+        // Cipratan saat baru masuk air.
+        const sw = this.player.swimming;
+        if (sw && !this._wasSwimming) this.sfx.play('splash');
+        this._wasSwimming = sw;
+        // Autosave tiap 10 detik.
+        this._saveTimer += dt;
+        if (this._saveTimer > 10) { this._saveTimer = 0; this.save(); }
       }
-      const mv = this.input.moveVector();
-      this.player.update(dt, mv, this.world.colliders, this.input.running);
-      // Peti: dorong bila bersentuhan.
-      const crate = this.crate;
-      const dx = crate.x - this.player.x, dz = crate.z - this.player.z;
-      if (Math.hypot(dx, dz) < crate.half + 0.7) {
-        crate.pushFrom(this.player.x, this.player.z, this.player.vx, this.player.vz);
-      }
-      crate.update(dt, this.world.colliders);
-      this.world.crate.position.set(crate.x, crate.y + 0.7, crate.z);
-      this.world.crate.rotation.y += (Math.hypot(crate.vx, crate.vz) * dt) * 0.4;
-      this.animals.update(dt, t);
-      this.updateInteraction();
-      // Suara air: penuh di tepi sungai, memudar sampai hilang ~22 m.
-      const dRiver = riverDistance(this.player.x, this.player.z);
-      const wl = dRiver <= 0 ? 1 : 1 - smoothstep(3, 22, dRiver);
-      if (Math.abs(wl - this._waterLevel) > 0.02) { this._waterLevel = wl; this.sfx.setWaterLevel(wl); }
-      // Cipratan saat baru masuk air.
-      const sw = this.player.swimming;
-      if (sw && !this._wasSwimming) this.sfx.play('splash');
-      this._wasSwimming = sw;
-      // Autosave tiap 10 detik.
-      this._saveTimer += dt;
-      if (this._saveTimer > 10) { this._saveTimer = 0; this.save(); }
       this._fpsCheck(rawDt);
       this.ui.updateHUD(this.state);
     }
     this.world.update(dt, this.state.minutes);
-    // Kamera third-person: smooth follow dari belakang-atas. Selama intro
-    // (~4 detik pertama), kamera lebih tinggi + jauh agar kebun, sungai, dan
-    // pegunungan masuk frame pembuka.
+    // Kamera: intro ~4 detik (posisi pembuka, orbit diabaikan), lalu orbit
+    // third-person mengikuti pemain. Selama fase 'lying'/'dark' urutan tidur,
+    // kamera scripted di dalam kamar; fase lain tidur = orbit biasa.
     const px = this.player.x, py = this.player.y, pz = this.player.z;
-    const intro = performance.now() < this._introUntil;
-    const camTarget = intro
-      ? new THREE.Vector3(px - 3, py + 3, pz - 10)
-      : new THREE.Vector3(px, py + 1.6, pz);
-    const desired = intro
-      ? new THREE.Vector3(px - 2, py + 13, pz + 20)
-      : new THREE.Vector3(px, py + 7.5, pz + 11);
+    const intro = !this.sleeping && performance.now() < this._introUntil;
+    const scripted = this.sleeping && (this.sleepPhase === 'lying' || this.sleepPhase === 'dark');
+    let camTarget, desired;
+    if (scripted) {
+      const bed = this.world.bedroom.bed;
+      const by = terrainHeight(bed.x, bed.z);
+      camTarget = new THREE.Vector3(bed.x, by + 1.0, bed.z);
+      desired = new THREE.Vector3(bed.x + 3.4, by + 2.4, bed.z + 4.1);
+    } else if (intro) {
+      camTarget = new THREE.Vector3(px - 3, py + 3, pz - 10);
+      desired = new THREE.Vector3(px - 2, py + 13, pz + 20);
+    } else {
+      camTarget = new THREE.Vector3(px, py + 1.6, pz);
+      const o = this.input.orbit;
+      const cp = Math.cos(o.pitch), sp = Math.sin(o.pitch);
+      desired = new THREE.Vector3(
+        px + o.dist * Math.sin(o.yaw) * cp,
+        py + 1.6 + o.dist * sp,
+        pz + o.dist * Math.cos(o.yaw) * cp,
+      );
+      // Kamera tidak boleh masuk tanah: angkat ke terrain + 0.5 m.
+      const minY = terrainHeight(desired.x, desired.z) + 0.5;
+      if (desired.y < minY) desired.y = minY;
+    }
     this.camera.position.lerp(desired, 1 - Math.pow(0.001, dt));
     this.camera.lookAt(camTarget);
     this.renderer.render(this.scene, this.camera);
@@ -341,7 +393,7 @@ class Game {
     this.ui.setHint(ctx ? '' : t('hintNearPlot', this.state.lang));
   }
   doAction() {
-    if (!this.started) return;
+    if (!this.started || this.sleeping) return; // urutan tidur: aksi dikunci
     const ctx = this._ctx;
     if (!ctx) return;
     const lang = this.state.lang;
@@ -624,17 +676,149 @@ class Game {
     if (got) this.save();
     return got || false;
   }
+  // ---------- Urutan tidur sinematik (~10 detik) ----------
+  // Fase (semua timing dari wall-clock performance.now(), BUKAN akumulasi dt
+  // — rAF berhenti saat tab hidden, jadi urutan tidak pernah softlock):
+  //   walk-in (auto-jalan ke pintu → masuk) → lying (berbaring di kasur,
+  //   kamera masuk kamar) → dark (fade gelap + hari berganti) → morning
+  //   (fade terang + bangun + jalan keluar). Safety: >25 detik dipaksa selesai.
   sleep() {
+    if (!this.started || this.sleeping) return false;
+    this.input.locked = true;
+    this.sleeping = true;
+    document.body.classList.add('sleeping'); // HUD + kontrol sentuh disembunyikan selama adegan
+    this.ui.setActionLabel('');
+    this.ui.setHint('');
+    this._sleep = {
+      t0: performance.now(),
+      phase: null, phaseT0: 0,
+      advanced: false,          // advanceDay() sudah jalan atau belum
+      waypoints: [this.world.doorPos, this.world.bedroom.doorIn],
+      wpIndex: 0,
+    };
+    this._setSleepPhase('walk-in');
+    return true;
+  }
+  _setSleepPhase(phase, now = performance.now()) {
+    const s = this._sleep;
+    if (!s) return;
+    s.phase = phase;
+    s.phaseT0 = now;
+    this.sleepPhase = phase;
+    if (phase === 'lying') {
+      // Posisikan di kasur: kepala (ke utara) jatuh di bantal — pemain di
+      // z = bed.z + 1.0, bukan di tengah kasur.
+      const bed = this.world.bedroom.bed;
+      this.world.bedroom.show(true);
+      this.player.teleport(bed.x, bed.z + 1.0);
+      this.player.setLying(true);
+    } else if (phase === 'dark') {
+      this.ui.setSleepFade(true);
+      this.sfx.play('sleep');
+    } else if (phase === 'morning') {
+      // Pop interior tertutup kegelapan: atap/dinding kembali sebelum terang.
+      this.world.bedroom.show(false);
+      this.player.setLying(false);
+      this.ui.setSleepFade(false);
+      s.waypoints = [this.world.bedroom.doorIn, this.world.doorPos];
+      s.wpIndex = 0;
+    }
+  }
+  // Logika ganti hari (dulu isi sleep() instan): dipanggil SEKALI di tengah
+  // urutan, saat layar gelap. Toast 'morning' tetap muncul — di akhir urutan.
+  advanceDay() {
     const grown = this.farm.plots.filter((p) => p.crop && p.watered).length;
     this.farm.growDay();
     const prod = this.animals.produceMorning();
     this.state.day += 1;
     this.state.minutes = DAY_START;
-    this.sfx.play('sleep');
     this.save();
-    this.ui.toast(t('morning', this.state.lang, { d: this.state.day }));
     this.ui.updateHUD(this.state);
     return { day: this.state.day, grown, eggs: prod.eggs, milk: prod.milk };
+  }
+  // Jalan otomatis menuju (tx, tz) dengan vektor sintetis. Colliders kosong
+  // supaya pemain bisa melewati pintu (dinding rumah = collider). Kembalikan
+  // jarak sisa. Konversi dunia→ruang kamera = kebalikan rotasi yaw (matriks
+  // rotasi di loop() adalah involusi: R² = I).
+  _autoWalkToward(tx, tz, dt) {
+    const dx = tx - this.player.x, dz = tz - this.player.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.05) { this.player.update(dt, { x: 0, y: 0, mag: 0 }, [], false); return d; }
+    const wx = dx / d, wz = dz / d; // arah dunia ternormalisasi
+    const yaw = this.input.orbit.yaw;
+    const cy = Math.cos(yaw), sy = Math.sin(yaw);
+    this.player.update(dt, { x: wx * cy - wz * sy, y: -wx * sy - wz * cy, mag: 1 }, [], false);
+    return d;
+  }
+  _updateSleep(now, dt) {
+    const s = this._sleep;
+    if (!s) return;
+    const total = now - s.t0;
+    const inPhase = now - s.phaseT0;
+    // Safety absolut: apa pun yang terjadi, urutan selesai <25 detik.
+    if (total > 25000) { this._finishSleep(); return; }
+    switch (s.phase) {
+      case 'walk-in': {
+        const wp = s.waypoints[s.wpIndex];
+        const d = this._autoWalkToward(wp.x, wp.z, dt);
+        if (d < 0.5) {
+          s.wpIndex += 1;
+          if (s.wpIndex >= s.waypoints.length) this._setSleepPhase('lying', now);
+        } else if (inPhase > 6000) {
+          // Macet (mis. terjebak geometri): teleport ke dalam sebagai fallback.
+          const di = this.world.bedroom.doorIn;
+          this.player.teleport(di.x, di.z);
+          this._setSleepPhase('lying', now);
+        }
+        break;
+      }
+      case 'lying': {
+        // Tetap panggil update supaya blend berbaring + napas berjalan.
+        this.player.update(dt, { x: 0, y: 0, mag: 0 }, [], false);
+        if (inPhase > 3000) this._setSleepPhase('dark', now);
+        break;
+      }
+      case 'dark': {
+        this.player.update(dt, { x: 0, y: 0, mag: 0 }, [], false);
+        // Hari berganti saat layar sudah gelap (fade 1.2 dtk).
+        if (!s.advanced && inPhase > 1300) {
+          s.advanced = true;
+          this.advanceDay();
+        }
+        if (inPhase > 2600) this._setSleepPhase('morning', now);
+        break;
+      }
+      case 'morning': {
+        const wp = s.waypoints[s.wpIndex];
+        const d = this._autoWalkToward(wp.x, wp.z, dt);
+        if (d < 0.5) {
+          s.wpIndex += 1;
+          if (s.wpIndex >= s.waypoints.length) { this._finishSleep(); return; }
+        } else if (inPhase > 6000) {
+          const dp = this.world.doorPos;
+          this.player.teleport(dp.x, dp.z);
+          this._finishSleep(); return;
+        }
+        break;
+      }
+      default: break;
+    }
+  }
+  _finishSleep() {
+    const s = this._sleep;
+    // Bila safety timeout memotong sebelum 'dark', hari tetap berganti.
+    if (s && !s.advanced) { s.advanced = true; this.advanceDay(); }
+    this.player.setLying(false);
+    this.world.bedroom.show(false);
+    this.ui.setSleepFade(false);
+    this.input.locked = false;
+    this.sleeping = false;
+    document.body.classList.remove('sleeping');
+    this.sleepPhase = null;
+    this._sleep = null;
+    this.save(); // posisi akhir (di luar pintu) ikut tersimpan
+    this.ui.toast(t('morning', this.state.lang, { d: this.state.day }));
+    this.ui.updateHUD(this.state);
   }
   teleport(x, z) { this.player.teleport(x, z); return true; }
   addCoins(n) { this.state.coins = Math.max(0, this.state.coins + n); this.save(); return this.state.coins; }

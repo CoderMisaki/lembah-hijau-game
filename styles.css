@@ -68,6 +68,21 @@ html, body {
 }
 #game-container { position: fixed; inset: 0; }
 #game-canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+/* Fade malam urutan tidur: satu momen sinematik, opacity saja (token
+   --lh-night). Durasi 1.2 dtk disengaja — transisi adegan, bukan interaksi
+   UI mikro (<300ms). Di atas HUD/modal, di bawah toast. visibility ikut
+   mati saat fade selesai supaya overlay transparan tidak menutupi apa pun
+   (hit-test maupun pembaca layar) saat tidak dipakai. */
+#sleep-fade {
+  position: absolute; inset: 0; z-index: 25;
+  background: var(--lh-night); opacity: 0; pointer-events: none;
+  visibility: hidden;
+  transition: opacity 1.2s ease, visibility 0s linear 1.2s;
+}
+#sleep-fade.on { opacity: 1; visibility: visible; transition: opacity 1.2s ease, visibility 0s; }
+/* Selama urutan tidur sinematik, layar milik adegan: HUD + kontrol sentuh
+   disembunyikan. Toast tetap tampil (di luar #hud). */
+body.sleeping #hud, body.sleeping #touch-controls { display: none; }
 .hidden { display: none !important; }
 button { font-family: inherit; cursor: pointer; min-height: 44px; }
 
@@ -157,6 +172,44 @@ h1, h2 {
 #hint-bar:empty { display: none; }
 /* Hint sudah lewat 3 detik: memudar (tetap di DOM sampai teks berikutnya). */
 #hint-bar.hint-fade { opacity: 0; }
+
+/* ---------- Minimap realtime ---------- */
+/* Kanan bawah hud-top — satu-satunya strip yang kosong: tengah atas ada
+   inv-bar, kiri bawah joystick, kanan bawah tombol aksi, tengah bawah
+   hint-bar. Panel kertas + border kayu, tanpa bayangan berat. */
+#minimap {
+  position: absolute; top: 76px; right: 12px; z-index: 5;
+  pointer-events: auto;
+  background: var(--lh-paper);
+  border: 2px solid var(--lh-wood);
+  border-radius: var(--lh-r-panel);
+  padding: 2px var(--lh-s2) var(--lh-s2);
+  width: max-content;
+}
+.minimap-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--lh-s2);
+  min-height: 44px; padding-left: var(--lh-s1);
+}
+.minimap-title {
+  font-family: var(--lh-display); font-weight: 700; font-size: 15px; color: var(--lh-bark);
+}
+.minimap-toggle {
+  width: 44px; height: 44px; min-height: 44px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: 10px; color: var(--lh-bark);
+  transition: background-color var(--lh-t-fast) var(--lh-ease), transform var(--lh-t-fast) var(--lh-ease);
+}
+.minimap-toggle:hover { background: var(--lh-leaf-soft); }
+.minimap-toggle:active { transform: scale(.93); }
+.minimap-toggle .ui-icon { width: 20px; height: 20px; transition: transform var(--lh-t-fast) var(--lh-ease); }
+#minimap.collapsed .minimap-toggle .ui-icon { transform: rotate(180deg); }
+#minimap-canvas {
+  display: block; width: 168px; height: 168px;
+  border-radius: var(--lh-r-btn);
+  border: 1px solid var(--lh-hairline);
+}
+#minimap.collapsed #minimap-canvas { display: none; }
+#minimap.collapsed { padding-bottom: 2px; }
 
 /* ---------- Touch controls ---------- */
 #touch-controls { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
@@ -397,7 +450,12 @@ h1, h2 {
 .swatch.selected { border: 2px solid var(--lh-leaf); outline: 2px solid var(--lh-leaf); outline-offset: 2px; }
 
 /* ---------- Small screens / landscape phones ---------- */
+@media (max-width: 1024px) {
+  #minimap-canvas { width: 140px; height: 140px; }
+}
 @media (max-width: 700px) {
+  #minimap { top: 68px; right: 8px; }
+  #minimap-canvas { width: 104px; height: 104px; }
   #inv-bar { max-width: 52vw; top: auto; bottom: 170px; left: 50%; }
   #hint-bar { bottom: 158px; }
   #joystick { width: 112px; height: 112px; }
@@ -416,6 +474,8 @@ h1, h2 {
   .row-btns .primary-btn, .row-btns .danger-btn { flex: 1 1 100%; }
 }
 @media (max-height: 480px) {
+  #minimap { top: 64px; }
+  #minimap-canvas { width: 88px; height: 88px; }
   #inv-bar { display: none; }
   #hint-bar { bottom: 150px; }
   .start-panel { padding: 14px; }

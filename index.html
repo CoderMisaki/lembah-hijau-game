@@ -15,6 +15,8 @@
 <body>
 <div id="game-container">
   <canvas id="game-canvas"></canvas>
+  <!-- Fade malam urutan tidur (diatur ui.setSleepFade) -->
+  <div id="sleep-fade" aria-hidden="true"></div>
 
   <!-- HUD -->
   <div id="hud" class="hidden">
@@ -33,6 +35,15 @@
     </div>
     <div id="inv-bar"></div>
     <div id="hint-bar"></div>
+
+    <!-- Minimap realtime (canvas 2D, digambar ~10 Hz oleh ui.js) -->
+    <div id="minimap">
+      <div class="minimap-head" id="minimap-head">
+        <span class="minimap-title" data-i18n="minimap">Peta</span>
+        <button id="btn-minimap-toggle" class="minimap-toggle" type="button" aria-expanded="true" aria-label="Lipat peta"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 15l6-6 6 6"/></svg></button>
+      </div>
+      <canvas id="minimap-canvas" role="img" aria-label="Peta lembah — posisi pemain, rumah, toko, kebun, dan kandang"></canvas>
+    </div>
   </div>
 
   <!-- Touch controls -->

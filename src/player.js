@@ -4,7 +4,7 @@
 // Penampilan dibentuk dari state kustomisasi (src/customization.js):
 // model + warna per kategori — semua geometri prosedural Three.js, low-poly.
 import * as THREE from 'three';
-import { GRAVITY, JUMP_VELOCITY, MAX_SPEED, ACCEL, FRICTION, clamp,
+import { GRAVITY, JUMP_VELOCITY, MAX_SPEED, ACCEL, FRICTION, clamp, PLAY_BOUND,
          terrainHeight, resolveCircleVsAABBs, isInRiver, isOnBridge, waterDepth, WATER_Y } from './physics.js';
 import { defaultCustom, sanitizeCustom, hexOf,
          SKIN_TONES, HAIR_COLORS, PALETTE, FRAME_COLORS } from './customization.js';
@@ -49,29 +49,32 @@ function addHair(g, style, hairC, skinMat) {
 }
 
 function addHat(g, model, hatC) {
-  if (model === 'none') return;
+  if (model === 'none') return null;
+  const hg = new THREE.Group(); // grup sendiri supaya bisa disembunyikan (mis. dilepas saat tidur)
   const hm = mat(hatC);
   if (model === 'straw') {
     const top = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.3, 10), hm);
-    top.position.y = 2.18; g.add(top);
+    top.position.y = 2.18; hg.add(top);
     const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.06, 12), hm);
-    brim.position.y = 2.04; g.add(brim);
+    brim.position.y = 2.04; hg.add(brim);
   } else if (model === 'cap') {
     const dome = new THREE.Mesh(new THREE.SphereGeometry(0.36, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), hm);
-    dome.position.y = 1.98; g.add(dome);
+    dome.position.y = 1.98; hg.add(dome);
     const visor = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.3), hm);
-    visor.position.set(0, 2.0, 0.42); g.add(visor);
+    visor.position.set(0, 2.0, 0.42); hg.add(visor);
   } else if (model === 'beanie') {
     const dome = new THREE.Mesh(new THREE.SphereGeometry(0.37, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.62), hm);
-    dome.position.y = 1.96; g.add(dome);
+    dome.position.y = 1.96; hg.add(dome);
     const band = new THREE.Mesh(new THREE.CylinderGeometry(0.37, 0.38, 0.12, 10), hm);
-    band.position.y = 1.94; g.add(band);
+    band.position.y = 1.94; hg.add(band);
   } else if (model === 'bandana') {
     const band = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.37, 0.16, 10), hm);
-    band.position.y = 2.0; g.add(band);
+    band.position.y = 2.0; hg.add(band);
     const knot = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 6), hm);
-    knot.position.set(0, 2.02, -0.36); g.add(knot);
+    knot.position.set(0, 2.02, -0.36); hg.add(knot);
   }
+  g.add(hg);
+  return hg;
 }
 
 function addGlasses(g, model, frameC) {
@@ -222,7 +225,7 @@ export function buildCharacter(gender, customInput) {
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 10), skinMat);
   head.position.y = 1.85; head.castShadow = true; upper.add(head);
   addHair(upper, c.hairStyle, hairC, skinMat);
-  addHat(upper, c.hatModel, hatC);
+  const hatGroup = addHat(upper, c.hatModel, hatC);
   addGlasses(upper, c.glassesModel, frameC);
   // Mata.
   const eyeMat = mat(0x1a1a1a);
@@ -247,7 +250,7 @@ export function buildCharacter(gender, customInput) {
   g.userData = {
     armL: armL.shoulder, armR: armR.shoulder,
     legL: legL.hip, legR: legR.hip,
-    body, head, upper,
+    body, head, upper, hat: hatGroup,
     elbowL: armL.elbow, elbowR: armR.elbow,
     kneeL: legL.knee, kneeR: legR.knee,
     shoeL: legL.shoe, shoeR: legR.shoe,
@@ -277,6 +280,12 @@ export class Player {
     this.swimAmp = 0;      // amplitudo renang terhaluskan
     this._bobPhase = 0;    // naik-turun mengapung
     this._wasAir = false;
+    // Berbaring (urutan tidur): group diputar -90° (kepala ke -Z, ke arah
+    // bantal bila menghadap selatan) + diangkat ke atas kasur. Rig/kustomisasi
+    // TIDAK diubah — hanya pose grup + lift yang di-blend halus.
+    this.lying = false;
+    this._lieBlend = 0;    // 0 berdiri ↔ 1 berbaring
+    this._lieLift = 0.95;  // asal grup di atas tanah saat berbaring (kasur ~0.72 + setengah tebal badan)
     this.group = buildCharacter(gender, this.custom);
     this.group.position.set(x, terrainHeight(x, z), z);
     scene.add(this.group);
@@ -302,7 +311,7 @@ export class Player {
     scene.add(this.group);
   }
   teleport(x, z) {
-    this.x = clamp(x, -78, 78); this.z = clamp(z, -78, 78);
+    this.x = clamp(x, -PLAY_BOUND, PLAY_BOUND); this.z = clamp(z, -PLAY_BOUND, PLAY_BOUND);
     this.vx = 0; this.vz = 0; this.yOff = 0; this.vy = 0;
     this._wasAir = false; this.landDip = 0;
     this.group.position.set(this.x, this.y, this.z);
@@ -312,8 +321,41 @@ export class Player {
     if (this.yOff <= 0.01) { this.vy = JUMP_VELOCITY; this.yOff = 0.01; return true; }
     return false;
   }
+  // Pose berbaring untuk urutan tidur. Menghadap selatan (facing 0) supaya
+  // kepala jatuh ke utara — ke arah bantal. Dipanggil main.js saat fase
+  // 'lying'; update() yang menganimasikan transisinya via _lieBlend.
+  setLying(v) {
+    this.lying = !!v;
+    // Topi dilepas saat tidur (tidak ikut rebah — kalau tidak, topi
+    // melayang di atas kepala saat grup diputar -90 derajat).
+    const hat = this.group.userData.hat;
+    if (hat) hat.visible = !this.lying;
+    if (this.lying) {
+      this.vx = 0; this.vz = 0; this.vy = 0; this.yOff = 0;
+      this.facing = 0;
+      this.group.rotation.y = 0;
+    }
+  }
   // move: {x, y} di ruang kamera (y = maju). dt detik. running = sprint 1.6x.
   update(dt, move, colliders, running = false) {
+    // --- Berbaring: tanpa fisika/gerak, pose diluruskan halus ke rebah. ---
+    if (this.lying) {
+      this._lieBlend += (1 - this._lieBlend) * Math.min(1, dt * 6);
+      const k = Math.min(1, dt * 6);
+      const u = this.group.userData;
+      const ease = (obj, prop, target) => { obj[prop] += (target - obj[prop]) * k; };
+      ease(u.legL.rotation, 'x', 0); ease(u.legR.rotation, 'x', 0);
+      ease(u.kneeL.rotation, 'x', 0.05); ease(u.kneeR.rotation, 'x', 0.05);
+      ease(u.armL.rotation, 'x', 0); ease(u.armR.rotation, 'x', 0);
+      ease(u.elbowL.rotation, 'x', -0.1); ease(u.elbowR.rotation, 'x', -0.1);
+      ease(u.upper.rotation, 'x', 0); ease(u.upper.rotation, 'z', 0);
+      ease(u.upper.position, 'y', 0);
+      this.group.rotation.x = -Math.PI / 2 * this._lieBlend;
+      this.group.position.set(this.x, this.groundAt(this.x, this.z) + this._lieLift * this._lieBlend, this.z);
+      return;
+    }
+    // Bangun dari berbaring: blend kembali ke 0 (diterapkan di akhir update).
+    this._lieBlend += (0 - this._lieBlend) * Math.min(1, dt * 6);
     // Kamera menghadap -Z dunia (dari belakang karakter, sedikit dari atas):
     // maju = -Z, kanan = +X.
     const mx = move.x, mz = -move.y;
@@ -348,8 +390,8 @@ export class Player {
     }
     // Perenang tidak bisa lewat bawah jembatan (kepala mentok papan).
     if (this.swimming && isOnBridge(nx, nz2)) { nx = this.x; nz2 = this.z; }
-    this.x = clamp(nx, -78, 78);
-    this.z = clamp(nz2, -78, 78);
+    this.x = clamp(nx, -PLAY_BOUND, PLAY_BOUND);
+    this.z = clamp(nz2, -PLAY_BOUND, PLAY_BOUND);
     // Gravitasi + lompat — di air: mengapung, bukan jatuh.
     const wasAir = this._wasAir;
     if (this.swimming) {
@@ -434,7 +476,9 @@ export class Player {
     u.upper.position.y = (1 - sb) * (1 - ab) * (bobW + 0.012 * breath * (1 - amp) - 0.05 * this.landDip);
     u.upper.rotation.x = B(L(leanW, 0.06), 0.5);
     u.upper.rotation.z = (1 - ab) * swayW * (1 - sb);
-    this.group.position.set(this.x, this.y, this.z);
+    this.group.position.set(this.x, this.y + this._lieLift * this._lieBlend, this.z);
+    // Sisa transisi bangun: grup kembali tegak seiring _lieBlend → 0.
+    this.group.rotation.x = -Math.PI / 2 * this._lieBlend;
     // Hadap arah gerak (lerp sudut).
     let df = this.facing - this.group.rotation.y;
     while (df > Math.PI) df -= Math.PI * 2;

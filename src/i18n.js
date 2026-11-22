@@ -112,6 +112,12 @@ export const STRINGS = {
   // ---- Save / Load ----
   saveBtn: { id: 'Simpan', en: 'Save' },
   loadBtn: { id: 'Muat', en: 'Load' },
+  // ---- Minimap realtime ----
+  minimap: { id: 'Peta', en: 'Map' },
+  minimapLabel: { id: 'Peta lembah — posisi pemain, rumah, toko, kebun, dan kandang',
+                  en: 'Valley map — player position, house, shop, farm, and pen' },
+  minimapCollapse: { id: 'Lipat peta', en: 'Collapse map' },
+  minimapExpand: { id: 'Buka peta', en: 'Expand map' },
   saving: { id: 'Menyimpan…', en: 'Saving…' },
   savedCloud: { id: '✓ Berhasil tersimpan di server!', en: '✓ Progress saved to the server!' }, // taste-skill-ignore: ✓ is a text check mark in toast copy, not an emoji icon
   savedLocal: { id: '✓ Tersimpan di perangkat (offline — akan disinkron saat online).', // taste-skill-ignore: ✓ is a text check mark in toast copy, not an emoji icon

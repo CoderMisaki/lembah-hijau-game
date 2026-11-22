@@ -6,10 +6,19 @@ export class Input {
     this.running = false; // tahan tombol Lari / Shift = sprint 1.6x
     this.onAction = null; // () => void
     this.onJump = null;
+    // Kunci input selama urutan sinematik (mis. tidur): gerak nol, aksi/lompat
+    // diabaikan. Orbit kamera TIDAK dikunci (kamera sinematik mengabaikannya).
+    this.locked = false;
+    // Orbit kamera: yaw 0 + pitch 0.49 + jarak 12.5 = offset kamera lama
+    // (0, +5.9, +11) dari titik bidik (pemain +1.6 m). Pitch/jarak di-clamp.
+    this.orbit = { yaw: 0, pitch: 0.49, dist: 12.5 };
+    this._orbitPointers = new Map(); // pointerId -> {x, y}
+    this._pinchDist = 0;
     this._joyId = null;
     this._bindKeyboard();
     this._bindJoystick();
     this._bindButtons();
+    this._bindOrbit();
   }
   _bindKeyboard() {
     window.addEventListener('keydown', (e) => {
@@ -17,8 +26,8 @@ export class Input {
       if (e.repeat) return;
       this.keys.add(e.key.toLowerCase());
       if (e.key === 'Shift') this.running = true;
-      if (e.key === ' ' && this.onJump) this.onJump();
-      if ((e.key === 'e' || e.key === 'E') && this.onAction) this.onAction();
+      if (e.key === ' ' && this.onJump && !this.locked) this.onJump();
+      if ((e.key === 'e' || e.key === 'E') && this.onAction && !this.locked) this.onAction();
     });
     window.addEventListener('keyup', (e) => {
       this.keys.delete(e.key.toLowerCase());
@@ -28,6 +37,7 @@ export class Input {
   }
   // Vektor gerak ternormalisasi: x = kanan, y = maju (diubah main.js ke arah kamera).
   moveVector() {
+    if (this.locked) return { x: 0, y: 0, mag: 0 };
     let x = 0, y = 0;
     if (this.keys.has('w') || this.keys.has('arrowup')) y += 1;
     if (this.keys.has('s') || this.keys.has('arrowdown')) y -= 1;
@@ -45,6 +55,7 @@ export class Input {
     const R = 44; // radius gerak knob (px)
     const setKnob = (dx, dy) => { knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`; };
     const update = (t) => {
+      if (this.locked) return; // urutan sinematik: joystick tidak menggerakkan pemain
       const rect = base.getBoundingClientRect();
       let dx = t.clientX - (rect.left + rect.width / 2);
       let dy = t.clientY - (rect.top + rect.height / 2);
@@ -71,8 +82,8 @@ export class Input {
     const act = document.getElementById('btn-action');
     const jmp = document.getElementById('btn-jump');
     const run = document.getElementById('btn-run');
-    if (act) act.addEventListener('click', () => { if (this.onAction) this.onAction(); });
-    if (jmp) jmp.addEventListener('click', () => { if (this.onJump) this.onJump(); });
+    if (act) act.addEventListener('click', () => { if (this.onAction && !this.locked) this.onAction(); });
+    if (jmp) jmp.addEventListener('click', () => { if (this.onJump && !this.locked) this.onJump(); });
     // Tombol Lari: TAHAN (bukan klik) — sentuh/mouse down = lari, lepas = jalan.
     if (run) {
       const on = (e) => { e.preventDefault(); this.running = true; run.classList.add('active'); };
@@ -84,5 +95,60 @@ export class Input {
       run.addEventListener('mouseleave', off);
       window.addEventListener('mouseup', off);
     }
+  }
+  // Orbit kamera — HANYA di #game-canvas. Sentuhan/klik yang dimulai di
+  // elemen UI DOM (joystick, tombol, HUD, modal) tidak sampai ke canvas,
+  // jadi tidak pernah memutar kamera. 1 jari/mouse = putar (yaw bebas 360°,
+  // pitch di-clamp supaya kamera tidak masuk tanah); 2 jari = pinch zoom
+  // (jarak 6–18 m); wheel desktop = zoom. Pointer Events menyatukan
+  // mouse + sentuh; setPointerCapture menjaga drag tetap di canvas.
+  _bindOrbit() {
+    const canvas = document.getElementById('game-canvas');
+    if (!canvas) return;
+    const ORBIT = this.orbit;
+    const clampOrbit = () => {
+      ORBIT.pitch = Math.max(0.15, Math.min(1.25, ORBIT.pitch));
+      ORBIT.dist = Math.max(6, Math.min(18, ORBIT.dist));
+    };
+    canvas.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      canvas.setPointerCapture(e.pointerId);
+      this._orbitPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this._orbitPointers.size === 2) {
+        const [a, b] = [...this._orbitPointers.values()];
+        this._pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+      }
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      const prev = this._orbitPointers.get(e.pointerId);
+      if (!prev) return;
+      const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+      this._orbitPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this._orbitPointers.size === 1) {
+        // Seret ke atas = kamera naik (pitch +); seret ke samping = yaw.
+        ORBIT.yaw -= dx * 0.005;
+        ORBIT.pitch -= dy * 0.005;
+        clampOrbit();
+      } else if (this._orbitPointers.size === 2 && this._pinchDist > 0) {
+        const [a, b] = [...this._orbitPointers.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        if (d > 0) {
+          ORBIT.dist *= this._pinchDist / d; // jari menjauh = zoom in
+          this._pinchDist = d;
+          clampOrbit();
+        }
+      }
+    });
+    const endPointer = (e) => {
+      this._orbitPointers.delete(e.pointerId);
+      if (this._orbitPointers.size < 2) this._pinchDist = 0;
+    };
+    canvas.addEventListener('pointerup', endPointer);
+    canvas.addEventListener('pointercancel', endPointer);
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      ORBIT.dist *= Math.exp(e.deltaY * 0.001); // wheel ke bawah = zoom out
+      clampOrbit();
+    }, { passive: false });
   }
 }

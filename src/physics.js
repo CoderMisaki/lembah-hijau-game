@@ -9,6 +9,14 @@ export const FRICTION = 10;
 
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 export const lerp = (a, b, k) => a + (b - a) * k;
+// Batas jalan pemain (dipakai player.js teleport/update + DynamicBox).
+export const PLAY_BOUND = 120;
+// Zona baru (Lane W): danau kedua, bukit kincir, padang bunga, kebun buah, alun-alun.
+export const LAKE = { x: 58, z: -58, rx: 14, rz: 10 };      // danau (timur laut)
+export const WINDMILL = { x: -58, z: 55 };                  // bukit kincir angin (barat daya)
+export const MEADOW = { x: -50, z: -55, rx: 18, rz: 14 };   // padang bunga (barat laut)
+export const ORCHARD = { x: 48, z: 48 };                    // kebun buah (tenggara)
+export const SQUARE = { x: 16, z: -31 };                    // alun-alun desa (utara)
 export const smoothstep = (a, b, x) => {
   const k = clamp((x - a) / (b - a), 0, 1);
   return k * k * (3 - 2 * k);
@@ -39,14 +47,21 @@ export function isInRiver(x, z) {
 }
 
 // Tinggi terrain h(x,z): lembah landai di tengah, pegunungan di tepi,
-// cekungan dangkal di sepanjang sungai.
+// cekungan dangkal di sepanjang sungai + danau, bukit kincir di barat daya.
+// Cincin pegunungan digeser ke luar (mulai r~95) supaya area playable r<~110 tetap landai.
 export function terrainHeight(x, z) {
   const r = Math.hypot(x, z);
   let h = noise2(x, z) * 0.55;
-  h += smoothstep(52, 88, r) * 20;                    // cincin pegunungan
-  h += smoothstep(70, 95, r) * 14;
+  h += smoothstep(95, 140, r) * 20;                   // cincin pegunungan
+  h += smoothstep(115, 150, r) * 14;
   const dRiver = Math.abs(x - riverCenterX(z));
   h -= Math.max(0, 1 - dRiver / 7) * 1.6;             // lembah sungai
+  // Cekungan danau (elips): dasar ~-0,9 m, air dangkal untuk berendam kaki.
+  const le = ((x - LAKE.x) / LAKE.rx) ** 2 + ((z - LAKE.z) / LAKE.rz) ** 2;
+  h -= (1 - smoothstep(0.6, 1, le)) * 0.9;
+  // Bukit kincir: gundukan gauss lembut (puncak +4,2 m, sigma 20 m).
+  const hd = Math.hypot(x - WINDMILL.x, z - WINDMILL.z);
+  h += 4.2 * Math.exp(-(hd * hd) / (2 * 20 * 20));
   return h;
 }
 
@@ -119,7 +134,7 @@ export class DynamicBox {
     const r = resolveCircleVsAABBs(nx, nz, this.half, colliders);
     // Bila resolve mengubah posisi drastis, redam kecepatan.
     if (Math.abs(r.x - nx) > 0.01 || Math.abs(r.z - nz) > 0.01) { this.vx *= 0.3; this.vz *= 0.3; }
-    this.x = clamp(r.x, -78, 78);
-    this.z = clamp(r.z, -78, 78);
+    this.x = clamp(r.x, -PLAY_BOUND, PLAY_BOUND);
+    this.z = clamp(r.z, -PLAY_BOUND, PLAY_BOUND);
   }
 }

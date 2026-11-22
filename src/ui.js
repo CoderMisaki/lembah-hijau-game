@@ -8,6 +8,12 @@ import { icon } from './icons.js';
 import { CROPS } from './farm.js';
 import { ANIMAL_DEFS } from './animals.js';
 import { buildCharacter } from './player.js';
+// Minimap: konstanta fallback bila world.minimapData belum ada (lane dunia
+// paralel) — peta tetap tergambar dari data yang sudah diekspor.
+import {
+  HOUSE, SHOP, PEN, FARM_ORIGIN, FARM_COLS, FARM_ROWS, FARM_SPACING,
+} from './world.js';
+import { riverCenterX, RIVER_HALF } from './physics.js';
 import {
   SKIN_TONES, HAIR_STYLES, HAIR_COLORS, SHIRT_MODELS, PANTS_MODELS,
   HAT_MODELS, GLASSES_MODELS, SHOES_MODELS, PALETTE, FRAME_COLORS,
@@ -62,6 +68,10 @@ export class UI {
     this._custom = defaultCustom('male');
     this._customGender = 'male';
     this._preview = null; // {renderer, scene, camera, group, raf}
+    // ---- Minimap realtime ----
+    this._mmCollapsed = false;
+    this._mmLastDraw = 0;
+    this._mmFallback = null;
     this._bind();
   }
   _bind() {
@@ -99,6 +109,9 @@ export class UI {
     $('auth-pin-confirm').addEventListener('keydown', (e) => { if (e.key === 'Enter') this._submitAuth(); });
     $('btn-offline').addEventListener('click', () => this.h.onOffline());
     $('btn-logout').addEventListener('click', () => this.h.onLogout());
+    // ---- Minimap realtime ----
+    $('btn-minimap-toggle').addEventListener('click', (e) => { e.stopPropagation(); this._toggleMinimap(); });
+    window.addEventListener('resize', () => { if (!this._mmCollapsed) this._drawMinimap(true); });
     // ---- Kustomisasi ----
     $('btn-close-customize').addEventListener('click', () => this.closeCustomize());
     $('btn-custom-reset').addEventListener('click', () => {
@@ -116,12 +129,15 @@ export class UI {
     $('setting-lang').value = lang;
     $('btn-jump').setAttribute('aria-label', t('jump', lang));
     $('btn-run').setAttribute('aria-label', t('run', lang));
+    $('minimap-canvas').setAttribute('aria-label', t('minimapLabel', lang));
+    this._syncMinimapToggleLabel();
     if (this._customOptionsBuilt) this._renderCustomOptions();
   }
   showGame(isTouch) {
     $('start-screen').classList.add('hidden');
     $('hud').classList.remove('hidden');
     if (isTouch) $('touch-controls').classList.remove('hidden');
+    this._drawMinimap(true);
   }
   showStart(saveNote) {
     $('save-note').textContent = saveNote || '';
@@ -173,12 +189,282 @@ export class UI {
     add('carrot', inv.carrot, 'Wortel'); add('tomato', inv.tomato, 'Tomat'); add('pumpkin', inv.pumpkin, 'Labu');
     add('egg', inv.egg, 'Telur'); add('milk', inv.milk, 'Susu');
     this._setShopCoins(state.coins);
+    this._drawMinimap();
   }
   _setShopCoins(n) {
     const e = $('shop-coins');
     while (e.firstChild) e.removeChild(e.firstChild);
     e.appendChild(iconEl('coin'));
     e.appendChild(document.createTextNode(` ${n}`));
+  }
+
+  // ---------- Minimap realtime ----------
+  // Satu <canvas> 2D; digambar ulang max ~10 Hz (throttle di updateHUD yang
+  // dipanggil tiap frame). Warna isi peta = warna dunia itu sendiri:
+  // rumput #6da344, sungai #56a8d0 (sama dengan tekstur air world.js),
+  // tanah jalan #9a7b4f, kayu #8a6b3f, emas #ffb340 hanya untuk rumah
+  // pemain + titik pemain. Sumbu peta: x → kanan, z → bawah (utara di atas).
+  _toggleMinimap() {
+    this._mmCollapsed = !this._mmCollapsed;
+    $('minimap').classList.toggle('collapsed', this._mmCollapsed);
+    $('btn-minimap-toggle').setAttribute('aria-expanded', String(!this._mmCollapsed));
+    this._syncMinimapToggleLabel();
+    if (!this._mmCollapsed) this._drawMinimap(true);
+  }
+  _syncMinimapToggleLabel() {
+    $('btn-minimap-toggle').setAttribute('aria-label',
+      t(this._mmCollapsed ? 'minimapExpand' : 'minimapCollapse', this.lang));
+  }
+  // Bentuk bounds yang diterima: {minX,maxX,minZ,maxZ} |
+  // {min:{x,z},max:{x,z}} | {min,max} angka (peta bujur sangkar).
+  _normalizeBounds(b) {
+    if (!b || typeof b !== 'object') return null;
+    if (typeof b.minX === 'number' && typeof b.maxX === 'number'
+      && typeof b.minZ === 'number' && typeof b.maxZ === 'number') {
+      return { minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ };
+    }
+    if (b.min && typeof b.min.x === 'number' && b.max && typeof b.max.x === 'number') {
+      return { minX: b.min.x, maxX: b.max.x, minZ: b.min.z, maxZ: b.max.z };
+    }
+    if (typeof b.min === 'number' && typeof b.max === 'number') {
+      return { minX: b.min, maxX: b.max, minZ: b.min, maxZ: b.max };
+    }
+    return null;
+  }
+  // Satu bangunan/zona: {x,z,w,d} (pusat + ukuran) atau {minX,maxX,minZ,maxZ}.
+  _normalizeRect(r) {
+    if (!r || typeof r !== 'object') return null;
+    if (typeof r.minX === 'number' && typeof r.maxX === 'number') {
+      return {
+        x: (r.minX + r.maxX) / 2, z: (r.minZ + r.maxZ) / 2,
+        w: r.maxX - r.minX, d: r.maxZ - r.minZ,
+      };
+    }
+    if (typeof r.x === 'number' && typeof r.z === 'number') {
+      return { x: r.x, z: r.z, w: r.w || 4, d: r.d || 4 };
+    }
+    return null;
+  }
+  _normalizeMinimapData(d) {
+    const bounds = this._normalizeBounds(d.bounds);
+    if (!bounds) return null;
+    const houses = (Array.isArray(d.houses) ? d.houses : [])
+      .map((r) => { const n = this._normalizeRect(r); return n ? { ...n, player: Boolean(r && r.player) } : null; })
+      .filter(Boolean);
+    const point = (p) => (p && typeof p.x === 'number' && typeof p.z === 'number' ? { x: p.x, z: p.z } : null);
+    return {
+      bounds,
+      river: Array.isArray(d.river) ? d.river.filter((p) => p && typeof p.x === 'number') : [],
+      lake: d.lake && typeof d.lake.x === 'number'
+        ? { x: d.lake.x, z: d.lake.z, rx: d.lake.rx || 4, rz: d.lake.rz || 3 } : null,
+      houses,
+      shop: this._normalizeRect(d.shop),
+      farm: this._normalizeRect(d.farm),
+      pen: this._normalizeRect(d.pen),
+      paths: Array.isArray(d.paths)
+        ? d.paths.filter((p) => Array.isArray(p) && p.length > 1)
+          .map((p) => p.filter((q) => q && typeof q.x === 'number')) : [],
+      windmill: point(d.windmill),
+      well: point(d.well),
+    };
+  }
+  // Fallback bila world.minimapData belum ada: bangun dari konstanta yang
+  // sudah diekspor world.js / physics.js (sungai dari riverCenterX, jalan
+  // dari pola yang sama dengan pewarnaan terrain di world.js).
+  _fallbackMinimapData() {
+    if (this._mmFallback) return this._mmFallback;
+    const river = [];
+    for (let z = -32; z <= 32; z += 2) river.push({ x: riverCenterX(z), z });
+    this._mmFallback = {
+      bounds: { minX: -32, maxX: 32, minZ: -32, maxZ: 32 },
+      river,
+      lake: null,
+      houses: [{
+        x: (HOUSE.minX + HOUSE.maxX) / 2, z: (HOUSE.minZ + HOUSE.maxZ) / 2,
+        w: HOUSE.maxX - HOUSE.minX, d: HOUSE.maxZ - HOUSE.minZ, player: true,
+      }],
+      shop: {
+        x: (SHOP.minX + SHOP.maxX) / 2, z: (SHOP.minZ + SHOP.maxZ) / 2,
+        w: SHOP.maxX - SHOP.minX, d: SHOP.maxZ - SHOP.minZ,
+      },
+      farm: {
+        x: FARM_ORIGIN.x + ((FARM_COLS - 1) * FARM_SPACING) / 2,
+        z: FARM_ORIGIN.z + ((FARM_ROWS - 1) * FARM_SPACING) / 2,
+        w: FARM_COLS * FARM_SPACING, d: FARM_ROWS * FARM_SPACING,
+      },
+      pen: {
+        x: (PEN.minX + PEN.maxX) / 2, z: (PEN.minZ + PEN.maxZ) / 2,
+        w: PEN.maxX - PEN.minX, d: PEN.maxZ - PEN.minZ,
+      },
+      paths: [
+        [{ x: -12, z: -17 }, { x: 12, z: -17 }],
+        [{ x: 9, z: -17 }, { x: 9, z: 12 }],
+        [{ x: -28, z: 6 }, { x: 9, z: 6 }],
+      ],
+      windmill: null,
+      well: null,
+    };
+    return this._mmFallback;
+  }
+  // Sumber posisi pemain + data peta, berurutan:
+  // 1) handler getMinimap (bila main.js suatu saat mengopernya),
+  // 2) window.__LH_GAME (player + world.minimapData),
+  // 3) peta statis tanpa titik pemain (fallback di atas).
+  _resolveMinimap() {
+    let src = null;
+    if (typeof this.h.getMinimap === 'function') {
+      try { src = this.h.getMinimap(); } catch { src = null; }
+    }
+    if (!src && typeof window !== 'undefined' && window.__LH_GAME) {
+      const g = window.__LH_GAME;
+      src = { player: g.player || null, data: g.world ? g.world.minimapData : null };
+    }
+    if (!src) return { player: null, data: this._fallbackMinimapData() };
+    const data = src.data ? this._normalizeMinimapData(src.data) : null;
+    return { player: src.player || null, data: data || this._fallbackMinimapData() };
+  }
+  _drawMinimap(force = false) {
+    const now = performance.now();
+    if (!force && now - this._mmLastDraw < 100) return; // ~10 Hz
+    const canvas = $('minimap-canvas');
+    if (!canvas || this._mmCollapsed) return;
+    if ($('hud').classList.contains('hidden')) return;
+    const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
+    if (!cssW || !cssH) return;
+    this._mmLastDraw = now;
+    const { player, data } = this._resolveMinimap();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
+      canvas.width = Math.round(cssW * dpr);
+      canvas.height = Math.round(cssH * dpr);
+    }
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const b = data.bounds;
+    const s = Math.min(cssW / (b.maxX - b.minX), cssH / (b.maxZ - b.minZ));
+    const ox = (cssW - (b.maxX - b.minX) * s) / 2;
+    const oy = (cssH - (b.maxZ - b.minZ) * s) / 2;
+    const X = (x) => ox + (x - b.minX) * s;
+    const Z = (z) => oy + (z - b.minZ) * s;
+    const rect = (r) => { ctx.fillRect(X(r.x - r.w / 2), Z(r.z - r.d / 2), r.w * s, r.d * s); };
+    const WATER = '#56a8d0', GRASS = '#6da344', DIRT = '#9a7b4f', WOOD = '#8a6b3f';
+    // Rumput.
+    ctx.fillStyle = GRASS;
+    ctx.fillRect(0, 0, cssW, cssH);
+    // Danau.
+    if (data.lake) {
+      ctx.fillStyle = WATER;
+      ctx.beginPath();
+      ctx.ellipse(X(data.lake.x), Z(data.lake.z), Math.max(2, data.lake.rx * s), Math.max(2, data.lake.rz * s), 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Sungai (lebar asli 2 * RIVER_HALF dunia).
+    if (data.river.length > 1) {
+      ctx.strokeStyle = WATER;
+      ctx.lineWidth = Math.max(2, RIVER_HALF * 2 * s);
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      data.river.forEach((p, i) => { if (i === 0) ctx.moveTo(X(p.x), Z(p.z)); else ctx.lineTo(X(p.x), Z(p.z)); });
+      ctx.stroke();
+    }
+    // Jalan tanah.
+    ctx.strokeStyle = DIRT;
+    ctx.lineWidth = Math.max(2, 1.6 * s);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    for (const path of data.paths) {
+      ctx.beginPath();
+      path.forEach((p, i) => { if (i === 0) ctx.moveTo(X(p.x), Z(p.z)); else ctx.lineTo(X(p.x), Z(p.z)); });
+      ctx.stroke();
+    }
+    // Kebun (tanah olahan + garis petak).
+    if (data.farm) {
+      ctx.fillStyle = '#a08050';
+      rect(data.farm);
+      ctx.strokeStyle = '#6b5233';
+      ctx.lineWidth = 1;
+      const fx = X(data.farm.x - data.farm.w / 2), fz = Z(data.farm.z - data.farm.d / 2);
+      for (let i = 1; i < FARM_COLS; i++) {
+        ctx.beginPath(); ctx.moveTo(fx + (i * data.farm.w * s) / FARM_COLS, fz);
+        ctx.lineTo(fx + (i * data.farm.w * s) / FARM_COLS, fz + data.farm.d * s); ctx.stroke();
+      }
+      for (let i = 1; i < FARM_ROWS; i++) {
+        ctx.beginPath(); ctx.moveTo(fx, fz + (i * data.farm.d * s) / FARM_ROWS);
+        ctx.lineTo(fx + data.farm.w * s, fz + (i * data.farm.d * s) / FARM_ROWS); ctx.stroke();
+      }
+      ctx.strokeStyle = WOOD;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(fx, fz, data.farm.w * s, data.farm.d * s);
+    }
+    // Kandang (pagar kayu, isi krem).
+    if (data.pen) {
+      ctx.fillStyle = '#e6d9b8';
+      rect(data.pen);
+      ctx.strokeStyle = WOOD;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(X(data.pen.x - data.pen.w / 2), Z(data.pen.z - data.pen.d / 2), data.pen.w * s, data.pen.d * s);
+    }
+    // Rumah: rumah pemain emas, rumah lain kayu. Toko: daun.
+    for (const h of data.houses) {
+      ctx.fillStyle = h.player ? '#ffb340' : WOOD;
+      rect(h);
+      ctx.strokeStyle = '#2b2118';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(X(h.x - h.w / 2), Z(h.z - h.d / 2), h.w * s, h.d * s);
+    }
+    if (data.shop) {
+      ctx.fillStyle = '#2e7d32';
+      rect(data.shop);
+      ctx.strokeStyle = '#2b2118';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(X(data.shop.x - data.shop.w / 2), Z(data.shop.z - data.shop.d / 2), data.shop.w * s, data.shop.d * s);
+    }
+    // Kincir (baling-baling) / sumur (lingkaran air + ring kayu).
+    if (data.windmill) {
+      const wx = X(data.windmill.x), wz = Z(data.windmill.z);
+      ctx.strokeStyle = '#4a3419';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(wx - 4, wz - 4); ctx.lineTo(wx + 4, wz + 4);
+      ctx.moveTo(wx + 4, wz - 4); ctx.lineTo(wx - 4, wz + 4);
+      ctx.stroke();
+      ctx.fillStyle = '#4a3419';
+      ctx.beginPath(); ctx.arc(wx, wz, 2, 0, Math.PI * 2); ctx.fill();
+    }
+    if (data.well) {
+      const wx = X(data.well.x), wz = Z(data.well.z);
+      ctx.fillStyle = WATER;
+      ctx.beginPath(); ctx.arc(wx, wz, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = WOOD;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(wx, wz, 3.5, 0, Math.PI * 2); ctx.stroke();
+    }
+    // Bingkai batas playable.
+    ctx.strokeStyle = WOOD;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, cssW - 2, cssH - 2);
+    // Titik pemain: segitiga emas berputar sesuai facing.
+    // facing = atan2(vx, vz): arah dunia (sin f, cos f) di (x, z) → di
+    // canvas (sin f, cos f) di (x, y); segitiga menunjuk ke atas (0,-1)
+    // diputar sebesar (π − f) searah jarum jam.
+    if (player && typeof player.x === 'number' && typeof player.z === 'number') {
+      const px = X(player.x), py = Z(player.z);
+      const f = typeof player.facing === 'number' ? player.facing : 0;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(Math.PI - f);
+      ctx.fillStyle = 'rgba(255, 253, 242, .9)';
+      ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffb340';
+      ctx.strokeStyle = '#2b2118';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(0, -7); ctx.lineTo(5, 5); ctx.lineTo(-5, 5); ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   // ---------- Akun ----------
@@ -428,6 +714,9 @@ export class UI {
   // ---- Tidur / pengaturan
   openSleep() { $('sleep-modal').classList.remove('hidden'); }
   closeSleep() { $('sleep-modal').classList.add('hidden'); }
+  // Fade malam urutan tidur: #sleep-fade (overlay --lh-night, transisi
+  // opacity 1.2 dtk). pointer-events none — tidak pernah menelan input.
+  setSleepFade(on) { $('sleep-fade').classList.toggle('on', !!on); }
   openSettings(state) {
     const s = state || this._lastState || {};
     $('setting-lang').value = s.lang || this.lang;
