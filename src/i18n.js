@@ -290,6 +290,20 @@ export const STRINGS = {
   // NIGHT MARKET F — end
   // NIGHT MARKET — coordinator wiring
   mpGameResult: { id: '{u} menang {n} koin di pasar malam!', en: '{u} won {n} coins at the night market!' },
+  // NIGHT MARKET C — invite "Ajak Main" (Lane C)
+  inviteBtn: { id: 'Ajak Main', en: 'Invite to Play' },
+  inviteYes: { id: 'Ya', en: 'Yes' },
+  inviteNo: { id: 'Tidak', en: 'No' },
+  inviteTitle: { id: '{u} mengajak main {a}', en: '{u} invites you to play {a}' },
+  inviteJoined: { id: 'Main bareng {u}!', en: 'Playing together with {u}!' },
+  inviteDeclined: { id: '{u} menolak ajakan.', en: '{u} declined the invite.' },
+  inviteExpired: { id: 'Undangan ke {u} kedaluwarsa.', en: 'Invite to {u} expired.' },
+  inviteJoinFailed: { id: 'Gagal masuk wahana — coba lagi nanti.', en: 'Could not join the ride — try again later.' },
+  inviteNeedRoom: { id: 'Masuk room dulu untuk mengajak main.', en: 'Join a room first to invite someone.' },
+  inviteNeedNear: { id: 'Tidak ada teman dalam 10 m.', en: 'No friend within 10 m.' },
+  inviteNeedActivity: { id: 'Berdiri di wahana atau game dulu.', en: 'Stand at a ride or game first.' },
+  inviteWaiting: { id: 'Menunggu jawaban {u}…', en: 'Waiting for {u} to answer…' },
+  inviteReady: { id: 'Ajak {u} main {a}', en: 'Invite {u} to play {a}' },
 };
 
 export function t(key, lang = 'id', vars = {}) {

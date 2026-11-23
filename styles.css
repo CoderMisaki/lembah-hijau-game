@@ -405,6 +405,26 @@ h1, h2 {
   pointer-events: none;
   box-shadow: var(--lh-shadow); /* taste-skill-ignore: toast is a real overlay above the game */
 }
+
+/* ---------- Ajak Main (undangan main bareng, Lane C) ---------- */
+/* Tombol di #hud-right: nonaktif sampai ada teman dekat + ada aktivitas. */
+#btn-invite:disabled { opacity: .55; cursor: not-allowed; }
+#btn-invite:disabled:hover { background: var(--lh-paper-2); }
+/* Kartu kecil tengah-bawah layar — di bawah hint-bar, di atas tombol sentuh. */
+#invite-dialog {
+  position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);
+  z-index: 30; width: max-content; max-width: 92vw;
+  background: var(--lh-paper); color: var(--lh-ink);
+  border: 2px solid var(--lh-wood); border-radius: var(--lh-r-panel);
+  padding: var(--lh-s3) var(--lh-s4);
+  text-align: center;
+}
+#invite-dialog-text {
+  margin: 0 0 var(--lh-s3);
+  font-weight: 700; font-size: clamp(14px, 2.2vw, 17px); line-height: 1.35;
+}
+.invite-dialog-actions { display: flex; gap: var(--lh-s3); justify-content: center; }
+.invite-dialog-actions .primary-btn { min-width: 96px; min-height: 44px; }
 #error-box {
   position: absolute; top: 10px; left: 10px; right: 10px; z-index: 50;
   background: var(--lh-error-bg); color: var(--lh-white);

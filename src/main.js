@@ -21,6 +21,8 @@ import { buildNightMarketGames } from './nm-games.js';
 import { buildNightMarketRides } from './nm-rides.js';
 import { buildNightMarketFood } from './nm-food.js';
 import { Multiplayer } from './multiplayer.js';
+import { NmInvite } from './nm-invite.js';
+import { createBots } from './nm-bots.js';
 import {
   getSession, setSession, clearSession, hasPending, markPending, clearPending,
   validateUsername, validatePin, normalizeUsername,
@@ -166,6 +168,9 @@ class Game {
       g.traverse((o) => { if (o.isMesh && o.castShadow) this._nmCasters.push(o); });
     }
     this._nmShadows = true;
+    // ---- Bot pasar malam (Lane B): driver arena + 2 penumpang bot.
+    this.nmBots = createBots(this);
+    this.nmBots.attachArena(); // method instance (bukan standalone) agar debug().arena terisi
     // Geometri jauh (pegunungan) butuh far ini; langit aman via trik sky dome.
     this.camera.far = this.world.view.camFar;
     this.camera.updateProjectionMatrix();
@@ -221,6 +226,12 @@ class Game {
         });
       },
       onEvent: (type, data) => {
+        // Invite "Ajak Main": rute event invite ke modul (tanpa mengubah
+        // handler chat/joined/game_result yang sudah ada di bawah).
+        if (type === 'invite' || type === 'invite_accept'
+          || type === 'invite_decline' || type === 'activity_join') {
+          this.invite?.handleEvent(type, data);
+        }
         const lang = this.state.lang;
         if (type === 'chat') this.ui.addRoomChat(data.from, data.text);
         else if (type === 'joined') this.ui.toast(t('roomJoined', lang, { code: data.code }));
@@ -234,8 +245,46 @@ class Game {
         }
       },
     });
-    this.ui.h.onCreateRoom = () => this.mp.createRoom();
-    this.ui.h.onJoinRoom = (code) => this.mp.joinRoom(code);
+    // ---- Ajak Main (invite): undang pemain terdekat ke aktivitas yang sama.
+    this.invite = new NmInvite({
+      game: this,
+      mp: this.mp,
+      toast: (m) => this.ui?.toast(m),
+      t: (k, vars) => t(k, this.state.lang, vars),
+      getSelfName: () => selfName(),
+      getSelfKey: () => this.mp._presenceKey,
+      getLocalPosition: () => ({ x: this.player.x, z: this.player.z }),
+      // Aktivitas pemain lokal saat ini: naik wahana > panel game terbuka >
+      // _ctx board point. (Modul punya default yang sama persis; ditulis
+      // eksplisit di sini supaya wiring-nya kelihatan.)
+      getActivity: () => {
+        if (this.nmRides.isRiding()) {
+          const rid = this.nmRides.debug.state().riding;
+          if (rid) return { kind: 'ride', id: rid };
+        }
+        const open = this.nmGames.debug.state().open;
+        if (open) return { kind: 'game', id: open };
+        const ctx = this._ctx;
+        if (ctx && ctx.type === 'nm') return { kind: 'ride', id: ctx.id };
+        if (ctx && ctx.type === 'nmGame') return { kind: 'game', id: ctx.id };
+        return null;
+      },
+      // Masuk aktivitas. Turun dulu bila naik wahana lain / beda (onUse
+      // bersifat toggle — panggil ulang = turun/tutup; sameness check ada
+      // di modul via _activeActivity, ini belt-and-braces).
+      joinActivity: (activity) => {
+        if (activity.kind === 'ride') {
+          if (this.nmRides.isRiding()) {
+            if (this.nmRides.debug.state().riding === activity.id) return true;
+            this.nmRides.stopRide();
+          }
+          return !!this.nmRides.onUse(activity.id, this);
+        }
+        if (this.nmRides.isRiding()) this.nmRides.stopRide();
+        return !!this.nmGames.onUse(activity.id, this);
+      },
+    });
+    this.ui.h.onCreateRoom = () => this.mp.createRoom();    this.ui.h.onJoinRoom = (code) => this.mp.joinRoom(code);
     this.ui.h.onLeaveRoom = () => this.mp.leaveRoom();
     this.ui.h.onSendChat = (text) => { if (this.mp.sendChat(text)) this.ui.addRoomChat(selfName(), text); };
     this.ui.h.getRemotePlayers = () => this.remotePlayers || [];
@@ -434,6 +483,8 @@ class Game {
         this.nmGames.update(dt, t, this);
         this.nmFood.update(dt, t, this);
         this.nmRides.update(dt, t, this);
+        this.invite?.update(dt);
+        this.nmBots?.update(dt);
         if (this.mp.connected) this.mp.sendPosition(this.player.x, this.player.z, this.player.facing);
         if (this.nmRides.isRiding()) {
           // Naik wahana: tombol Aksi = Turun — selalu aktif, untuk SEMUA
@@ -480,7 +531,6 @@ class Game {
     this.nightmarket.update(dt, t, this.player);
     const inNm = this.nightmarket.nightFactor > 0.5;
     if (this._nmBadge) this._nmBadge.classList.toggle('hidden', !inNm);
-    if (this.started && inNm && !this._inNightMarket) this.ui.toast(i18nT('nmEnter', this.state.lang));
     this._inNightMarket = inNm;
     // Kamera: intro ~4 detik (posisi pembuka, orbit diabaikan), lalu orbit
     // third-person mengikuti pemain. Selama fase 'lying'/'dark' urutan tidur,

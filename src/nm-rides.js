@@ -47,7 +47,7 @@ export const NM_RIDES = [
   { id: 'pirate', x: 84, z: -40, kind: 'ride', labelKey: 'ridePirate', cost: 0 },
   { id: 'carousel', x: 94, z: -40, kind: 'ride', labelKey: 'rideCarousel', cost: 0 },
   { id: 'chairs', x: 82, z: -48, kind: 'ride', labelKey: 'rideChairs', cost: 0 },
-  { id: 'bumper', x: 96, z: -48, kind: 'ride', labelKey: 'rideBumper', cost: 0 },
+  { id: 'bumper', x: 93, z: -48.25, kind: 'ride', labelKey: 'rideBumper', cost: 0 },
   { id: 'tagada', x: 70, z: -32, kind: 'ride', labelKey: 'rideTagada', cost: 0 },
   { id: 'coaster', x: 64, z: -39, kind: 'ride', labelKey: 'rideCoaster', cost: 0 },
   { id: 'haunted', x: 71, z: 35, kind: 'attraction', labelKey: 'rideHaunted', cost: 0 },
@@ -506,27 +506,178 @@ function makeTagada() {
   };
 }
 
-// --- Bom-bom car (96,-48) arena 8x8 — KENDARAI ---
+// --- Bom-bom car (93,-48.25) arena 14x7,5 — KENDARAI ---
+// Arena BARU (Lane A, 2026-11-23): 14 x 7,5 m = 105 m2, ~1,6x luas arena
+// lama (8x8 = 64 m2). Rect dipilih dari survei sudut timur-laut zona
+// (x besar, z kecil — penamaan ikut physics.js: danau (58,-58) = timur laut):
+//   NM_RECT utama x 58..103, z -50..44 + annex x 74..104, z -55..-45.
+//   Batas DATAR-PENUH (mask terrain = 1; butuh jarak >= 3 m dari tepi rect):
+//   utara z >= -52 (annex), timur x <= 100 (rect utama), selatan z <= -44,5
+//   (0,7 m sebelum collider komidi putar z=-43,8), barat x >= 86 (1,2 m
+//   dari collider kursi terbang x=84,8). -> x 86..100, z -52..-44,5.
+//   Tetangga: komidi putar (94,-40) di selatan, kursi terbang (82,-48) di
+//   barat, tagada (70,-32) jauh di barat-daya, tong motor (98,-32) di selatan.
+//   Gerbang di pagar selatan (celah x 97,5..99,5); board/exit (98,5,-42,8)
+//   di koridor timur komidi — bisa dijangkau pejalan kaki dari selatan.
+//   Rel coaster oval lewat DI ATAS (y=8) — truss arena 4,4 m aman di bawahnya.
+//   Titik minimap nm-zone.js (96,-48) tetap berada DI DALAM arena baru,
+//   jadi file itu tidak perlu diubah.
+const ARENA_CX = 93, ARENA_CZ = -48.25, ARENA_HW = 7, ARENA_HD = 3.75;
 function makeBumper() {
-  const gy = ground(96, -48);
+  const gy = ground(ARENA_CX, ARENA_CZ);
   const g = new T.Group();
-  g.position.set(96, gy, -48);
-  const floor = box(8, 0.15, 8, lam(0x2b3a67), 0, 0.08, 0);
+  g.position.set(ARENA_CX, gy, ARENA_CZ);
+  const LIM_X = ARENA_HW - 0.8; // 6,2 — setengah lebar dikurangi setengah mobil
+  const LIM_Z = ARENA_HD - 0.8; // 2,95
+  const _dummy = new T.Object3D();
+
+  // --- Lantai licin mengkilap (Phong shininess tinggi, warna terang) ---
+  const floor = box(14, 0.15, 7.5,
+    phong(0xdfe9f2, { shininess: 140, specular: 0xffffff }), 0, 0.08, 0);
   g.add(floor);
-  g.add(cyl(2.0, 2.0, 0.03, lam(C.gold), 0, 0.17, 0, 20));
-  const fenceMat = lam(C.red);
-  const fence = (w, d, x, z) => g.add(box(w, 0.8, d, fenceMat, x, 0.55, z));
-  fence(3, 0.25, -2.5, 3.9); fence(3, 0.25, 2.5, 3.9); // selatan, celah x -1..1
-  fence(8, 0.25, 0, -3.9);
-  fence(0.25, 8, -3.9, 0); fence(0.25, 8, 3.9, 0);
-  // Tiang lampu sudut.
-  for (const [sx, sz] of [[-3.9, -3.9], [3.9, -3.9], [-3.9, 3.9], [3.9, 3.9]]) {
-    g.add(cyl(0.07, 0.07, 2.2, lam(C.woodDark), sx, 1.1, sz, 6));
-    g.add(sph(0.18, emi(C.yellow, 1.8), sx, 2.3, sz, 6, 6));
+  g.add(cyl(1.6, 1.6, 0.03, lam(C.gold), 0, 0.17, 0, 20));
+  g.add(cyl(0.55, 0.55, 0.032, lam(C.red), 0, 0.175, 0, 16));
+
+  // --- Pagar keliling (rel merah + tiang krem), celah gerbang selatan ---
+  const GATE = { min: 4.5, max: 6.5 }; // X lokal, di pagar selatan
+  const railMat = lam(C.red);
+  const rail = (w, d, x, y, z) => g.add(box(w, 0.1, d, railMat, x, y, z));
+  for (const y of [0.95, 0.5]) { // rel atas + tengah
+    rail(14, 0.12, 0, y, -ARENA_HD); // utara penuh
+    rail(11.5, 0.12, -1.25, y, ARENA_HD); // selatan kiri (-7..4,5)
+    rail(0.5, 0.12, 6.75, y, ARENA_HD); // selatan kanan (6,5..7)
+    rail(0.12, 7.5, -ARENA_HW, y, 0); // barat
+    rail(0.12, 7.5, ARENA_HW, y, 0); // timur
   }
+  const postPos = [];
+  for (let x = -ARENA_HW; x <= ARENA_HW + 0.01; x += 1.15) {
+    postPos.push([x, -ARENA_HD]);
+    if (x < GATE.min || x > GATE.max) postPos.push([x, ARENA_HD]);
+  }
+  for (let z = -ARENA_HD + 1.15; z <= ARENA_HD - 1.15 + 0.01; z += 1.15) {
+    postPos.push([-ARENA_HW, z]);
+    postPos.push([ARENA_HW, z]);
+  }
+  const posts = new T.InstancedMesh(
+    new T.BoxGeometry(0.12, 0.95, 0.12), lam(C.cream), postPos.length);
+  postPos.forEach(([px, pz], i) => {
+    _dummy.position.set(px, 0.48, pz);
+    _dummy.rotation.set(0, 0, 0);
+    _dummy.scale.set(1, 1, 1);
+    _dummy.updateMatrix();
+    posts.setMatrixAt(i, _dummy.matrix);
+  });
+  posts.instanceMatrix.needsUpdate = true;
+  g.add(posts);
+
+  // --- Papan neon "BOMBOM CAR" + skor (canvas texture, digambar kode) ---
+  const signCanvas = document.createElement('canvas');
+  signCanvas.width = 512; signCanvas.height = 160;
+  const signCtx = signCanvas.getContext('2d');
+  const signTex = new T.CanvasTexture(signCanvas);
+  if (T.SRGBColorSpace) signTex.colorSpace = T.SRGBColorSpace;
+  function drawSign(score) {
+    const c = signCtx;
+    c.clearRect(0, 0, 512, 160);
+    c.fillStyle = '#17102e'; c.fillRect(0, 0, 512, 160);
+    c.strokeStyle = '#ffb340'; c.lineWidth = 8; c.strokeRect(6, 6, 500, 148);
+    c.strokeStyle = '#f27ba7'; c.lineWidth = 3; c.strokeRect(16, 16, 480, 128);
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = '700 58px Georgia, serif';
+    c.shadowColor = '#ff5c4a'; c.shadowBlur = 18;
+    c.fillStyle = '#fff3d6';
+    c.fillText('BOMBOM CAR', 256, 58);
+    c.shadowBlur = 0;
+    c.font = '700 40px Georgia, serif';
+    c.shadowColor = '#39d353'; c.shadowBlur = 12;
+    c.fillStyle = '#8dff9e';
+    c.fillText('SKOR  ' + score, 256, 122);
+    c.shadowBlur = 0;
+    signTex.needsUpdate = true;
+  }
+  drawSign(0);
+  // Dua sisi (selatan menghadap pasar, utara menghadap ke dalam arena —
+  // pengemudi yang menghadap utara tetap bisa membaca skornya).
+  const signMat = new T.MeshBasicMaterial({ map: signTex });
+  const signGeo = new T.PlaneGeometry(6.4, 2.0);
+  const signBackMat = emi(C.gold, 1.2);
+  for (const sz of [1, -1]) {
+    g.add(box(6.7, 2.3, 0.08, signBackMat, 0, 3.3, sz * (ARENA_HD + 0.12)));
+    const plane = mesh(signGeo, signMat, 0, 3.3, sz * (ARENA_HD + 0.17));
+    if (sz < 0) plane.rotation.y = Math.PI;
+    g.add(plane);
+  }
+
+  // --- Truss neon di atas (tiang sudut + balok atas + bola warna-warni) ---
+  // TANPA PointLight baru (aturan performa: lampu zona ikut culling; lampu
+  // baru tidak ikut) — semua cahaya dari material emissive/basic saja.
+  const trussMat = lam(C.woodDark);
+  for (const [sx, sz] of [[-6.6, -3.4], [6.6, -3.4], [-6.6, 3.4], [6.6, 3.4]]) {
+    g.add(cyl(0.09, 0.09, 4.4, trussMat, sx, 2.2, sz, 6));
+  }
+  const beam = (w, d, x, z) => g.add(box(w, 0.14, d, trussMat, x, 4.4, z));
+  beam(13.2, 0.14, 0, -3.4);
+  beam(13.2, 0.14, 0, 3.4);
+  beam(0.14, 6.8, -6.6, 0);
+  beam(0.14, 6.8, 6.6, 0);
+  beam(13.2, 0.12, 0, 0); // balok tengah
+  const bulbPos = [];
+  for (let x = -6.6; x <= 6.61; x += 1.2) {
+    bulbPos.push([x, 4.4, -3.4]); bulbPos.push([x, 4.4, 3.4]); bulbPos.push([x, 4.55, 0]);
+  }
+  for (let z = -2.2; z <= 2.21; z += 1.1) {
+    bulbPos.push([-6.6, 4.4, z]); bulbPos.push([6.6, 4.4, z]);
+  }
+  const bulbCols = [C.red, C.yellow, C.teal, C.pink, C.green, C.gold];
+  const bulbs = new T.InstancedMesh(
+    new T.SphereGeometry(0.14, 8, 6),
+    new T.MeshBasicMaterial({ color: 0xffffff }), bulbPos.length);
+  bulbPos.forEach(([bx, by, bz], i) => {
+    _dummy.position.set(bx, by, bz);
+    _dummy.rotation.set(0, 0, 0);
+    _dummy.scale.setScalar(1);
+    _dummy.updateMatrix();
+    bulbs.setMatrixAt(i, _dummy.matrix);
+    bulbs.setColorAt(i, new T.Color(bulbCols[i % bulbCols.length]));
+  });
+  bulbs.instanceMatrix.needsUpdate = true;
+  if (bulbs.instanceColor) bulbs.instanceColor.needsUpdate = true;
+  g.add(bulbs);
+
+  // --- Penonton siluet di balik pagar (6 figur gelap; 2 melambai pelan) ---
+  // Berdiri di tanah masing-masing (ground() sendiri) — strip utara tidak
+  // sepenuhnya rata, jadi tidak ditempel ke gy arena.
+  const specCols = [0x241d1a, 0x2e2a26, 0x3a2b4d, 0x1d2b1a, 0x33241d, 0x26262e];
+  const specSpots = [
+    { x: -4.5, z: -4.6, s: 1.0, wave: false },
+    { x: -1.5, z: -4.6, s: 1.08, wave: true },
+    { x: 1.5, z: -4.6, s: 0.95, wave: false },
+    { x: 4.5, z: -4.6, s: 1.04, wave: false },
+    { x: 7.7, z: -2.0, s: 1.0, wave: true },
+    { x: 7.7, z: 0.5, s: 0.92, wave: false },
+  ];
+  const wavers = [];
+  for (const [i, sp] of specSpots.entries()) {
+    const fig = new T.Group();
+    const mat = lam(specCols[i % specCols.length]);
+    fig.add(box(0.46, 1.1, 0.3, mat, 0, 0.55, 0));
+    fig.add(sph(0.17, mat, 0, 1.28, 0, 8, 6));
+    if (sp.wave) {
+      const pivot = new T.Group();
+      pivot.position.set(0.28, 1.02, 0);
+      pivot.add(box(0.1, 0.55, 0.1, mat, 0, 0.22, 0));
+      fig.add(pivot);
+      wavers.push({ pivot, phase: i * 1.3 });
+    }
+    fig.scale.setScalar(sp.s);
+    fig.position.set(sp.x, ground(ARENA_CX + sp.x, ARENA_CZ + sp.z) - gy, sp.z);
+    g.add(fig);
+  }
+
+  // --- Mobil (1 pemain + 3 bot) — visual sama seperti arena lama ---
   const carCols = [C.red, C.yellow, C.teal, C.pink];
   const cars = [];
-  const starts = [[0, 2], [-2, -1], [2, -1], [0, -2.5]];
+  const starts = [[0, 2], [-4, -1.5], [4, -1.5], [0, -2.5]];
   for (let i = 0; i < 4; i++) {
     const cg = new T.Group();
     cg.add(box(1.15, 0.45, 1.6, lam(carCols[i]), 0, 0.45, 0, true));
@@ -537,10 +688,103 @@ function makeBumper() {
     cars.push({
       g: cg, x: starts[i][0], z: starts[i][1], heading: (i * Math.PI) / 2,
       vx: 0, vz: 0, target: null, retarget: 0,
+      botIndex: i === 0 ? -1 : i - 1, driver: null,
     });
   }
+
+  // --- Skor tabrakan (pemain + tiap bot) ---
+  const scores = { player: 0, bots: [0, 0, 0] };
+
+  // --- Percikan tabrakan: pool 48 partikel (6 burst x 8), tanpa alokasi ---
+  const SPARK_N = 48;
+  const sparks = new T.InstancedMesh(
+    new T.SphereGeometry(0.12, 6, 5),
+    new T.MeshBasicMaterial({ color: 0xffc93c }), SPARK_N);
+  const sparkP = [];
+  for (let i = 0; i < SPARK_N; i++) {
+    sparkP.push({ life: 0, x: 0, y: -10, z: 0, vx: 0, vy: 0, vz: 0 });
+  }
+  for (let i = 0; i < SPARK_N; i++) {
+    _dummy.position.set(0, -10, 0);
+    _dummy.rotation.set(0, 0, 0);
+    _dummy.scale.setScalar(0);
+    _dummy.updateMatrix();
+    sparks.setMatrixAt(i, _dummy.matrix);
+  }
+  sparks.instanceMatrix.needsUpdate = true;
+  g.add(sparks);
+  let sparksActive = 0, sparksTotal = 0;
+  let lastHit = null; // {t, x, z} tabrakan terakhir (koordinat lokal)
+  function spawnBurst(x, z) {
+    let spawned = 0;
+    for (let i = 0; i < SPARK_N && spawned < 8; i++) {
+      const p = sparkP[i];
+      if (p.life > 0) continue;
+      const a = Math.random() * TAU;
+      const sp = 1.5 + Math.random() * 2;
+      p.life = 0.5; p.x = x; p.y = 0.5; p.z = z;
+      p.vx = Math.cos(a) * sp; p.vz = Math.sin(a) * sp; p.vy = 1 + Math.random() * 1.5;
+      spawned++;
+    }
+    if (spawned > 0) { sparksActive += spawned; sparksTotal++; }
+  }
+  function updateSparks(dt) {
+    if (sparksActive === 0) return;
+    let alive = 0;
+    for (let i = 0; i < SPARK_N; i++) {
+      const p = sparkP[i];
+      if (p.life <= 0) continue;
+      p.life -= dt;
+      if (p.life <= 0) {
+        p.y = -10;
+        _dummy.position.set(0, -10, 0);
+        _dummy.scale.setScalar(0);
+      } else {
+        p.vy -= 6 * dt;
+        p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+        if (p.y < 0.2) { p.y = 0.2; p.vy = Math.abs(p.vy) * 0.4; }
+        _dummy.position.set(p.x, p.y, p.z);
+        _dummy.scale.setScalar(Math.min(1, p.life / 0.15));
+        alive++;
+      }
+      _dummy.rotation.set(0, 0, 0);
+      _dummy.updateMatrix();
+      sparks.setMatrixAt(i, _dummy.matrix);
+    }
+    sparksActive = alive;
+    sparks.instanceMatrix.needsUpdate = true;
+  }
+
+  // --- Driver bot (SEAM Lane B): fn(car, dt, api) -> {fwd, steer} ---
+  // car = {x, z, heading, vx, vz, ...} (koordinat lokal arena);
+  // api = {cars, playerCar, bounds:{minX,maxX,minZ,maxZ}} (bounds lokal).
+  // Default = AI lama (kejar titik acak). setBotDriver(botIndex 0..2,
+  // fn|null): botIndex 0 = cars[1]; null = kembali ke default.
+  const bounds = { minX: -LIM_X, maxX: LIM_X, minZ: -LIM_Z, maxZ: LIM_Z };
+  const driverApi = { cars, playerCar: cars[0], bounds };
+  function defaultBotDriver(car, dt) {
+    car.retarget -= dt;
+    if (!car.target || car.retarget <= 0
+      || Math.hypot(car.target[0] - car.x, car.target[1] - car.z) < 0.8) {
+      car.target = [(Math.random() * 2 - 1) * LIM_X * 0.8,
+        (Math.random() * 2 - 1) * LIM_Z * 0.8];
+      car.retarget = 4;
+    }
+    const dx = car.target[0] - car.x, dz = car.target[1] - car.z;
+    const want = Math.atan2(dx, dz);
+    let dh = want - car.heading;
+    while (dh > Math.PI) dh -= TAU;
+    while (dh < -Math.PI) dh += TAU;
+    return { fwd: 1, steer: clamp(dh * 1.5, -1, 1) };
+  }
+  function setBotDriver(botIndex, fn) {
+    const car = cars[(botIndex | 0) + 1];
+    if (!car || (fn !== null && typeof fn !== 'function')) return false;
+    car.driver = fn;
+    return true;
+  }
+
   const st = { driving: false, t: 0 };
-  const LIM = 3.2; // setengah arena (4) - setengah mobil (0.8)
   function stepCar(c, dt, input) {
     let ax = 0, az = 0;
     if (input) {
@@ -552,10 +796,13 @@ function makeBumper() {
       az = Math.cos(c.heading) * fwd * 9;
     } else {
       // AI: kejar titik acak, ganti tiap 4 dtk / saat sampai.
+      // (Mobil pemain saat belum dinaiki ikut berkeliling seperti bot —
+      // perilaku arena lama dipertahankan.)
       c.retarget -= dt;
       if (!c.target || c.retarget <= 0
         || Math.hypot(c.target[0] - c.x, c.target[1] - c.z) < 0.8) {
-        c.target = [(Math.random() * 2 - 1) * 2.4, (Math.random() * 2 - 1) * 2.4];
+        c.target = [(Math.random() * 2 - 1) * LIM_X * 0.8,
+          (Math.random() * 2 - 1) * LIM_Z * 0.8];
         c.retarget = 4;
       }
       const dx = c.target[0] - c.x, dz = c.target[1] - c.z;
@@ -578,14 +825,38 @@ function makeBumper() {
     if (sp > max) { c.vx *= max / sp; c.vz *= max / sp; }
     c.x += c.vx * dt;
     c.z += c.vz * dt;
-    if (c.x < -LIM) { c.x = -LIM; c.vx = Math.abs(c.vx) * 0.5; }
-    if (c.x > LIM) { c.x = LIM; c.vx = -Math.abs(c.vx) * 0.5; }
-    if (c.z < -LIM) { c.z = -LIM; c.vz = Math.abs(c.vz) * 0.5; }
-    if (c.z > LIM) { c.z = LIM; c.vz = -Math.abs(c.vz) * 0.5; }
+    if (c.x < -LIM_X) { c.x = -LIM_X; c.vx = Math.abs(c.vx) * 0.5; }
+    if (c.x > LIM_X) { c.x = LIM_X; c.vx = -Math.abs(c.vx) * 0.5; }
+    if (c.z < -LIM_Z) { c.z = -LIM_Z; c.vz = Math.abs(c.vz) * 0.5; }
+    if (c.z > LIM_Z) { c.z = LIM_Z; c.vz = -Math.abs(c.vz) * 0.5; }
     c.g.position.set(c.x, 0.15, c.z);
     c.g.rotation.y = c.heading;
   }
-  function collideCars() {
+  function stepBot(c, dt) {
+    let out = null;
+    try { out = c.driver ? c.driver(c, dt, driverApi) : defaultBotDriver(c, dt); }
+    catch (e) { out = null; }
+    const fwd = clamp(out && typeof out.fwd === 'number' ? out.fwd : 0, -1, 1);
+    const steer = clamp(out && typeof out.steer === 'number' ? out.steer : 0, -1, 1);
+    c.heading += steer * 1.9 * dt * (fwd >= 0 ? 1 : -1);
+    const ax = Math.sin(c.heading) * fwd * 6;
+    const az = Math.cos(c.heading) * fwd * 6;
+    const damp = Math.exp(-1.6 * dt);
+    c.vx = c.vx * damp + ax * (1 - damp) / 1.6;
+    c.vz = c.vz * damp + az * (1 - damp) / 1.6;
+    const sp = Math.hypot(c.vx, c.vz);
+    if (sp > 2.6) { c.vx *= 2.6 / sp; c.vz *= 2.6 / sp; }
+    c.x += c.vx * dt;
+    c.z += c.vz * dt;
+    if (c.x < -LIM_X) { c.x = -LIM_X; c.vx = Math.abs(c.vx) * 0.5; }
+    if (c.x > LIM_X) { c.x = LIM_X; c.vx = -Math.abs(c.vx) * 0.5; }
+    if (c.z < -LIM_Z) { c.z = -LIM_Z; c.vz = Math.abs(c.vz) * 0.5; }
+    if (c.z > LIM_Z) { c.z = LIM_Z; c.vz = -Math.abs(c.vz) * 0.5; }
+    c.g.position.set(c.x, 0.15, c.z);
+    c.g.rotation.y = c.heading;
+  }
+  const lastHitAt = {}; // "i-j" -> st.t terakhir (cooldown 0,6 dtk/pasangan)
+  function collideCars(now, h) {
     for (let i = 0; i < cars.length; i++) {
       for (let j = i + 1; j < cars.length; j++) {
         const a = cars[i], b = cars[j];
@@ -596,8 +867,31 @@ function makeBumper() {
           const nx = dx / d, nz = dz / d;
           a.x -= nx * push; a.z -= nz * push;
           b.x += nx * push; b.z += nz * push;
+          // Kecepatan relatif sepanjang normal (sebelum tukar velocity).
+          const relN = Math.abs((b.vx - a.vx) * nx + (b.vz - a.vz) * nz);
           const tvx = a.vx; a.vx = b.vx * 0.6; b.vx = tvx * 0.6;
           const tvz = a.vz; a.vz = b.vz * 0.6; b.vz = tvz * 0.6;
+          // Tabrakan "nyata": benturan cukup keras + cooldown per pasangan
+          // 0,6 dtk (kontak menempel tidak menaikkan skor berulang).
+          const key = i + '-' + j;
+          if (relN > 1.2 && now - (lastHitAt[key] ?? -99) > 0.6) {
+            lastHitAt[key] = now;
+            lastHit = { t: +now.toFixed(2), x: +((a.x + b.x) / 2).toFixed(2), z: +((a.z + b.z) / 2).toFixed(2) };
+            spawnBurst(lastHit.x, lastHit.z);
+            if (i > 0) scores.bots[i - 1] += 1;
+            if (j > 0) scores.bots[j - 1] += 1;
+            // Skor pemain HANYA saat sedang mengemudi (st.driving): saat
+            // belum naik, cars[0] hanya mobil AI keempat — tabrakannya
+            // bukan skor pemain (skor di-reset tiap boardFn).
+            if (st.driving && (i === 0 || j === 0)) {
+              scores.player += 1;
+              drawSign(scores.player);
+              // 'eat' = 2 nada triangle rendah — sfx tabrakan ('bump') belum
+              // ada di audio.js; ini yang paling dekat dengan bunyi benturan
+              // (lihat REPORT lane A — usulan follow-up di luar file ini).
+              h?.sfx?.play?.('eat');
+            }
+          }
         }
       }
     }
@@ -605,23 +899,42 @@ function makeBumper() {
   return {
     id: 'bumper', group: g,
     colliders: [
-      { minX: 92, maxX: 95, minZ: -44.4, maxZ: -43.6 },
-      { minX: 97, maxX: 100, minZ: -44.4, maxZ: -43.6 },
-      { minX: 92, maxX: 100, minZ: -52.4, maxZ: -51.6 },
-      { minX: 92, maxX: 92.8, minZ: -52, maxZ: -44 },
-      { minX: 99.2, maxX: 100, minZ: -52, maxZ: -44 },
+      { minX: 86, maxX: 100, minZ: -52.3, maxZ: -51.7 }, // utara
+      { minX: 86, maxX: 97.5, minZ: -44.8, maxZ: -44.2 }, // selatan kiri
+      { minX: 99.5, maxX: 100, minZ: -44.8, maxZ: -44.2 }, // selatan kanan
+      { minX: 85.7, maxX: 86.3, minZ: -52, maxZ: -44.5 }, // barat
+      { minX: 99.7, maxX: 100.3, minZ: -52, maxZ: -44.5 }, // timur
     ],
-    board: { x: 96, z: -43.5, r: 3 }, exit: { x: 96, z: -43.5 },
-    boardFn() { st.driving = true; return true; },
-    update(dt, game) {
+    board: { x: 98.5, z: -42.8, r: 3 }, exit: { x: 98.5, z: -42.8 },
+    boardFn() {
+      st.driving = true;
+      scores.player = 0; scores.bots = [0, 0, 0];
+      drawSign(0);
+      return true;
+    },
+    update(dt, game, h) {
       st.t += dt;
       stepCar(cars[0], dt, st.driving ? game?.input : null);
-      for (let i = 1; i < 4; i++) stepCar(cars[i], dt, null);
-      collideCars();
+      for (let i = 1; i < 4; i++) stepBot(cars[i], dt);
+      collideCars(st.t, h);
+      updateSparks(dt);
+      // Penonton melambai + bola truss berdenyut (pakai st.t = waktu game).
+      for (const w of wavers) {
+        w.pivot.rotation.z = -2.2 + Math.sin(st.t * 2.2 + w.phase) * 0.35;
+      }
+      for (let i = 0; i < bulbPos.length; i++) {
+        const s = 0.85 + 0.25 * Math.sin(st.t * 3 + i * 0.7);
+        _dummy.position.set(bulbPos[i][0], bulbPos[i][1], bulbPos[i][2]);
+        _dummy.rotation.set(0, 0, 0);
+        _dummy.scale.setScalar(s);
+        _dummy.updateMatrix();
+        bulbs.setMatrixAt(i, _dummy.matrix);
+      }
+      bulbs.instanceMatrix.needsUpdate = true;
     },
     rider() {
       const c = cars[0];
-      return { x: 96 + c.x, y: gy + 0.4, z: -48 + c.z, ry: c.heading };
+      return { x: ARENA_CX + c.x, y: gy + 0.4, z: ARENA_CZ + c.z, ry: c.heading };
     },
     unboard() {
       st.driving = false;
@@ -629,7 +942,23 @@ function makeBumper() {
       c.vx = 0; c.vz = 0; c.x = 0; c.z = 2;
       c.g.position.set(0, 0.15, 2);
     },
-    debug() { return { car0: { x: cars[0].x, z: cars[0].z, heading: cars[0].heading } }; },
+    debug() {
+      return {
+        car0: { x: cars[0].x, z: cars[0].z, heading: cars[0].heading },
+        cars: cars.map((c, i) => ({
+          x: +c.x.toFixed(2), z: +c.z.toFixed(2),
+          heading: +c.heading.toFixed(2),
+          vx: +c.vx.toFixed(2), vz: +c.vz.toFixed(2),
+          score: i === 0 ? scores.player : scores.bots[i - 1],
+        })),
+        scores: { player: scores.player, bots: [...scores.bots] },
+        sparksActive, sparksTotal, lastHit,
+      };
+    },
+    // SEAM BOT (Lane B): {cars, scores:{player, bots[]}, setBotDriver(i, fn)}.
+    // cars = array live mobil (cars[0] pemain); setBotDriver(botIndex 0..2,
+    // fn|null) — botIndex 0 = cars[1]; fn(car, dt, api) -> {fwd, steer}.
+    arena: { cars, scores, setBotDriver },
   };
 }
 
@@ -1897,6 +2226,8 @@ export function buildNightMarketRides(scene, THREE, ctx = {}) {
       catch (e) { return null; }
     },
     isRiding() { return !!S.current; },
+    getEntry(id) { return byId[id] || null; }, // Lane A: akses entry (arena/seam bot) dari game/verify
+    getRideEntry(id) { return byId[id] || null; }, // alias: nama di spek Lane B
     stopRide,
     debug: {
       state() {

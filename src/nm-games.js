@@ -39,6 +39,19 @@ export const NM_GAMES = [
 
 export const NM_DEF = Object.fromEntries(NM_GAMES.map((g) => [g.id, g]));
 
+// Skor rival BOT per game (deterministik — nilai tetap, bukan acak tiap
+// buka): skor menengah-atas pemain terampil (skill 0.8), dihitung dari
+// distribusi hadiah playGameRound. Simulasi 200.000 ronde/game, skill 0.8:
+// peluang menyamai/mengalahkan skor ini 9-25% (ring 13%, dart 21%, duck
+// 19%, basket 17%, shoot 9%, wheel 25%, pusher 13%). Pengecualian cans:
+// hadiah maksimum 14 (6 kaleng + bonus 8), rival 13 hanya dikalahkan ronde
+// sempurna 14 — peluang 61% di skill 0.8, 34% di skill 0.5. Bukan mustahil,
+// bukan hadiah maksimum.
+export const NM_RIVAL = {
+  ring: 24, dart: 20, duck: 8, basket: 22,
+  shoot: 24, cans: 13, wheel: 25, pusher: 8,
+};
+
 // ---- Konfigurasi ekonomi + peluang (skill 0..1) ---------------------------
 // pHit(skill) = pMin + (pMax - pMin) * skill. Nilai p(0.5) = peluang pemain
 // rata-rata; EV dihitung pada skill 0.5 (lihat verify-nm-G.mjs).
@@ -576,6 +589,15 @@ export function buildNightMarketGames(scene, THREE, ctx) {
   const broadcast = (type, data) => {
     try { if (ctx.broadcast) ctx.broadcast(type, data); } catch (e) { /* abaikan */ }
   };
+  // Teks skor rival BOT — bilingual inline (tanpa key i18n baru: i18n.js
+  // bukan file lane ini; koordinator boleh memindahkannya ke key
+  // gameRival/gameRivalBeat/gameRivalTie bila mau).
+  const rivalLine = (id) => (lang() === 'en'
+    ? `Rival BOT score: ${NM_RIVAL[id]} — beat it!`
+    : `Skor rival BOT: ${NM_RIVAL[id]} — kalahkan!`);
+  const rivalBeatLine = (tie) => (lang() === 'en'
+    ? (tie ? 'You tied the BOT rival score!' : 'You beat the BOT rival score!')
+    : (tie ? 'Kamu menyamai skor rival BOT!' : 'Kamu mengalahkan skor rival BOT!'));
 
   // ---------- Animasi 3D ---------------------------------------------------
   function localPoint(stall, x, y, z) {
@@ -754,6 +776,7 @@ export function buildNightMarketGames(scene, THREE, ctx) {
     const title = el('h2'); title.id = 'nm-title';
     const cost = el('p', 'nm-cost'); cost.id = 'nm-cost';
     const how = el('p', 'nm-how'); how.id = 'nm-how';
+    const rival = el('p', 'nm-how'); rival.id = 'nm-rival';
     const aim = el('div', 'nm-aim hidden'); aim.id = 'nm-aim';
     const track = el('div', 'nm-aim-track'); track.id = 'nm-aim-track';
     track.setAttribute('tabindex', '0');
@@ -777,7 +800,7 @@ export function buildNightMarketGames(scene, THREE, ctx) {
     actionBtn.id = 'nm-action'; actionBtn.type = 'button';
     const closeBtn = el('button', 'primary-btn secondary'); closeBtn.id = 'nm-close'; closeBtn.type = 'button';
     btns.append(playBtn, actionBtn, closeBtn);
-    boxEl.append(title, cost, how, aim, status, result, btns);
+    boxEl.append(title, cost, how, rival, aim, status, result, btns);
     overlay.append(boxEl);
     document.body.appendChild(overlay);
 
@@ -811,7 +834,7 @@ export function buildNightMarketGames(scene, THREE, ctx) {
         syncAimDom();
       }
     });
-    return { overlay, title, cost, how, aim, track, band, dotsWrap, marker, aimHint, status, result, playBtn, actionBtn, closeBtn, $ };
+    return { overlay, title, cost, how, rival, aim, track, band, dotsWrap, marker, aimHint, status, result, playBtn, actionBtn, closeBtn, $ };
   }
 
   function syncAimDom() {
@@ -856,6 +879,7 @@ export function buildNightMarketGames(scene, THREE, ctx) {
     panel.title.textContent = T(def.labelKey);
     panel.cost.textContent = T('gameCost', { n: def.cost });
     panel.how.textContent = T('gameHow' + id[0].toUpperCase() + id.slice(1));
+    panel.rival.textContent = rivalLine(id);
     panel.status.textContent = '';
     panel.result.textContent = '';
     panel.aim.classList.add('hidden');
@@ -955,6 +979,8 @@ export function buildNightMarketGames(scene, THREE, ctx) {
     if (win) {
       addCoins(o.prize);
       panel.result.textContent = T('gameWin', { n: o.prize });
+      if (o.prize > NM_RIVAL[o.id]) panel.result.textContent += ' ' + rivalBeatLine(false);
+      else if (o.prize === NM_RIVAL[o.id]) panel.result.textContent += ' ' + rivalBeatLine(true);
       sfx('coin');
       if (o.prize >= 25) sfx('harvest');
       toast(T('gameWin', { n: o.prize }));
