@@ -73,17 +73,17 @@ function emi(color, intensity = 1) {
 function phong(color, extra = {}) {
   return new T.MeshPhongMaterial({ color, shininess: 90, ...extra });
 }
-function mesh(geo, material, x = 0, y = 0, z = 0, shadow = false) {
+function mesh(geo, material, x = 0, y = 0, z = 0, cast = false) {
   const m = new T.Mesh(geo, material);
   m.position.set(x, y, z);
-  m.castShadow = shadow;
+  m.castShadow = cast;
   return m;
 }
-function box(w, h, d, material, x = 0, y = 0, z = 0, shadow = false) {
-  return mesh(new T.BoxGeometry(w, h, d), material, x, y, z, shadow);
+function box(w, h, d, material, x = 0, y = 0, z = 0, cast = false) {
+  return mesh(new T.BoxGeometry(w, h, d), material, x, y, z, cast);
 }
-function cyl(rt, rb, h, material, x = 0, y = 0, z = 0, seg = 10, shadow = false) {
-  return mesh(new T.CylinderGeometry(rt, rb, h, seg), material, x, y, z, shadow);
+function cyl(rt, rb, h, material, x = 0, y = 0, z = 0, seg = 10, cast = false) {
+  return mesh(new T.CylinderGeometry(rt, rb, h, seg), material, x, y, z, cast);
 }
 function sph(r, material, x = 0, y = 0, z = 0, ws = 8, hs = 6) {
   return mesh(new T.SphereGeometry(r, ws, hs), material, x, y, z);
@@ -1764,17 +1764,23 @@ export function buildNightMarketRides(scene, THREE, ctx = {}) {
   host.appendChild(darkEl);
 
   // ---------- Bangun semua wahana ----------
+  // Grup induk: semua geometri wahana dalam satu grup supaya main.js bisa
+  // meng-culling bayangannya saat pemain jauh dari zona.
+  const group = new THREE.Group();
+  group.name = 'night-market-rides';
+  scene.add(group);
+
   const entries = [];
   const byId = {};
   for (const def of NM_RIDES) {
     const entry = BUILDERS[def.id]();
     entry.def = def;
-    scene.add(entry.group);
+    group.add(entry.group);
     entries.push(entry);
     byId[def.id] = entry;
   }
   const operator = makeOperator();
-  scene.add(operator);
+  group.add(operator);
 
   const colliders = entries.flatMap((e) => e.colliders || []);
   const interactables = entries.map((e) => ({
@@ -1933,6 +1939,7 @@ export function buildNightMarketRides(scene, THREE, ctx = {}) {
   return {
     colliders,
     interactables,
+    _group: group,
     update,
     onUse,
     getRiderTransform() {

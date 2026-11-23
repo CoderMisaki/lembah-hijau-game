@@ -450,6 +450,11 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
     dome.visible = on;
     stars.visible = on;
     moon.visible = on;
+    // Lampu: sembunyikan total saat jauh (intensitasnya memang 0 di sana).
+    // Lampu yang tidak terlihat dikeluarkan three.js dari program shader,
+    // menghemat biaya fragment di semua piksel — diukur headless di spawn:
+    // frame 432 ms -> 292 ms. Visual sama persis.
+    for (const li of lights) li.visible = on;
     if (on) {
       domeMat.opacity = 0.85 * k;
       starMat.opacity = 0.95 * k;

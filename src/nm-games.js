@@ -224,14 +224,14 @@ function cyl(THREE, parent, rTop, rBot, h, color, x, y, z, opts = {}, seg = 12) 
 
 // Cangkang stan: platform kayu + meja + 4 tiang + atap kain + papan nama + lampu.
 // Frame lokal: +z = arah jalan (depan stan). Mengembalikan { group, refs }.
-function buildStallShell(THREE, scene, ctx, def) {
+function buildStallShell(THREE, parent, ctx, def) {
   const groundY = terrainHeight(def.x, def.z);
   const g = new THREE.Group();
   g.position.set(def.x, groundY, def.z);
   // Utara (z=-12) menghadap selatan (+z, ke jalan); selatan (z=12) menghadap utara.
   g.rotation.y = def.z < 0 ? 0 : Math.PI;
   g.userData.nmStall = def.id;
-  scene.add(g);
+  parent.add(g);
   // Platform kayu (rok memanjang 0,5 m ke bawah tanah — menutup selisih
   // tinggi bila Lane P meratakan zona ke h≈0,6).
   box(THREE, g, 3.6, 0.5, 2.6, 0x9a7b4f, 0, 0.05, 0);
@@ -527,8 +527,14 @@ export function buildNightMarketGames(scene, THREE, ctx) {
     game: null,
   };
 
+  // Grup induk: semua geometri game dalam satu grup supaya main.js bisa
+  // meng-culling bayangannya saat pemain jauh dari zona.
+  const group = new THREE.Group();
+  group.name = 'night-market-games';
+  scene.add(group);
+
   for (const def of NM_GAMES) {
-    const shell = buildStallShell(THREE, scene, ctx, def);
+    const shell = buildStallShell(THREE, group, ctx, def);
     const refs = buildGameProps(THREE, shell, def);
     S.stalls.set(def.id, { def, shell, refs });
   }
@@ -577,7 +583,7 @@ export function buildNightMarketGames(scene, THREE, ctx) {
   }
   function flyProjectile(mesh, p0, p1, peak, dur, onLand) {
     mesh.position.copy(p0);
-    scene.add(mesh);
+    group.add(mesh);
     S.anims.push({ kind: 'proj', mesh, p0, p1, peak, t: 0, dur, onLand });
   }
   function ringMesh(color) {
@@ -712,11 +718,11 @@ export function buildNightMarketGames(scene, THREE, ctx) {
       }
       case 'pusher': {
         const p0 = localPoint(stall, 0, 2.6, 0.6);
-        const coin = cyl(THREE, scene, 0.22, 0.22, 0.06, 0xffb340, 0, 0, 0,
+        const coin = cyl(THREE, group, 0.22, 0.22, 0.06, 0xffb340, 0, 0, 0,
           { metalness: 0.6, roughness: 0.3 }, 16);
         const p1 = localPoint(stall, aimX * 0.7, 1.5, 0.3);
         flyProjectile(coin, p0, p1, 0.15, 0.5, () => {
-          scene.remove(coin);
+          group.remove(coin);
           const falling = (refs.coins || []).filter((c) => c.visible).slice(0, res.fallen);
           falling.forEach((c, i) => {
             S.anims.push({ kind: 'coinFall', mesh: c, t: 0, dur: 0.6 + i * 0.12 });
@@ -1005,7 +1011,7 @@ export function buildNightMarketGames(scene, THREE, ctx) {
           const z = p0.z + (p1.z - p0.z) * k;
           a.mesh.position.set(x, y, z);
           if (k >= 1) {
-            scene.remove(a.mesh);
+            group.remove(a.mesh);
             if (a.onLand) a.onLand();
             S.anims.splice(i, 1);
           }
@@ -1019,7 +1025,7 @@ export function buildNightMarketGames(scene, THREE, ctx) {
         }
         case 'sink': {
           a.mesh.position.y = a.fromY - k * 0.9;
-          if (k >= 1) { scene.remove(a.mesh); S.anims.splice(i, 1); }
+          if (k >= 1) { group.remove(a.mesh); S.anims.splice(i, 1); }
           break;
         }
         case 'spinTarget': {
@@ -1092,6 +1098,7 @@ export function buildNightMarketGames(scene, THREE, ctx) {
   const handle = {
     colliders,
     interactables,
+    _group: group,
     update,
     onUse,
     debug: {

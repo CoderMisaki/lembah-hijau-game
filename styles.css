@@ -119,6 +119,30 @@ h1, h2 {
 }
 #hud-left { display: flex; flex-direction: column; gap: 6px; }
 #hud-right { display: flex; gap: var(--lh-s2); flex-wrap: wrap; justify-content: flex-end; }
+
+/* Layar sempit / landscape pendek (<=1000px): bar atas satu baris yang bisa
+   di-scroll horizontal — 6 tombol tidak pernah terpotong minimap dan tidak
+   turun menutupi layar game. Scrollbar disembunyikan (strip tombol, bukan
+   konten); tombol tidak mengecil; urutan mulai dari Simpan (kiri). */
+@media (max-width: 1000px) {
+  #hud-top { flex-wrap: nowrap; }
+  #hud-left { flex-shrink: 0; }
+  #hud-right {
+    flex: 1 1 auto;
+    min-width: 0;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+    pointer-events: auto;
+    -webkit-overflow-scrolling: touch;
+    /* Sinyal visual bahwa strip bisa di-scroll: tepi kanan memudar. */
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent 100%); /* taste-skill-ignore: mask, not a gradient fill — scroll affordance for the button strip */
+    mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent 100%); /* taste-skill-ignore: mask, not a gradient fill — scroll affordance for the button strip */
+  }
+  #hud-right::-webkit-scrollbar { display: none; }
+  #hud-right .hud-btn { flex-shrink: 0; }
+}
 /* Chip kertas flat — bukan pill gelap: kertas + border kayu, radius tombol. */
 #coins-display, #day-display {
   background: var(--lh-paper);

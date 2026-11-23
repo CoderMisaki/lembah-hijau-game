@@ -16,7 +16,7 @@ import { attachDebug } from './debug.js';
 import { defaultCustom, sanitizeCustom } from './customization.js';
 // Pasar malam + multiplayer (23 Nov 2026): zona, 8 game berhadiah, wahana,
 // jajanan, room online via Supabase Realtime (ephemeral, tanpa tabel baru).
-import { buildNightMarketZone } from './nm-zone.js';
+import { buildNightMarketZone, NM_RECT } from './nm-zone.js';
 import { buildNightMarketGames } from './nm-games.js';
 import { buildNightMarketRides } from './nm-rides.js';
 import { buildNightMarketFood } from './nm-food.js';
@@ -155,6 +155,17 @@ class Game {
       sfx: this.sfx,
     });
     this.world.colliders.push(...this.nmFood.colliders);
+    // Culling bayangan pasar malam: kumpulkan mesh NM yang melempar
+    // bayangan (sekali, di init) — castShadow-nya dimatikan saat pemain
+    // jauh dari zona (loop). Proyektil game yang dibuat belakangan tidak
+    // ikut daftar: kecil, sedikit, dan hanya ada saat bermain (= pemain
+    // sudah di zona, bayangan menyala).
+    this._nmCasters = [];
+    for (const g of [this.nightmarket.group, this.nmGames._group, this.nmRides._group, this.nmFood._group]) {
+      if (!g) continue;
+      g.traverse((o) => { if (o.isMesh && o.castShadow) this._nmCasters.push(o); });
+    }
+    this._nmShadows = true;
     // Geometri jauh (pegunungan) butuh far ini; langit aman via trik sky dome.
     this.camera.far = this.world.view.camFar;
     this.camera.updateProjectionMatrix();
@@ -313,7 +324,17 @@ class Game {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    // Rotasi bisa mengubah status "layar kecil" -> terapkan cap DPR lagi.
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this._pixelRatioCap(QUALITY[this.state.quality].pixelRatio)));
     this.checkOrientation();
+  }
+
+  // Layar kecil (HP, sisi terpendek <= 500 px): batasi pixelRatio — piksel
+  // tambahan di layar mungil nyaris tidak terlihat tapi biayanya besar
+  // (diukur headless 844x390: DPR 2 ~2,4x frame time vs DPR 1).
+  _pixelRatioCap(cfgPr) {
+    const small = Math.min(window.innerWidth, window.innerHeight) <= 500;
+    return small ? Math.min(cfgPr, 1.25) : cfgPr;
   }
 
   // ---------- Kualitas grafis + auto-degrade ----------
@@ -321,7 +342,7 @@ class Game {
     if (!QUALITY[q]) q = 'medium';
     this.state.quality = q;
     const cfg = QUALITY[q];
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, cfg.pixelRatio));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this._pixelRatioCap(cfg.pixelRatio)));
     this.renderer.shadowMap.enabled = cfg.shadows;
     if (this.world?.sun) {
       this.world.sun.castShadow = cfg.shadows;
@@ -454,6 +475,20 @@ class Game {
     // third-person mengikuti pemain. Selama fase 'lying'/'dark' urutan tidur,
     // kamera scripted di dalam kamar; fase lain tidur = orbit biasa.
     const px = this.player.x, py = this.player.y, pz = this.player.z;
+    // Bayangan pasar malam: matikan castShadow saat pemain jauh dari zona.
+    // Bayangan jatuh di tanah dalam zona — dari >45 m tidak terlihat, tapi
+    // pass bayangan tetap membayar tiap caster. Hysteresis 30/45 m dari tepi
+    // rect supaya tidak flicker saat pemain mondar-mandir di batas. Skyline
+    // zona (bianglala, gapura, stan) tetap terlihat: yang dimatikan hanya
+    // bayangannya, bukan mesh-nya.
+    const _nmDx = Math.max(NM_RECT.minX - px, 0, px - NM_RECT.maxX);
+    const _nmDz = Math.max(NM_RECT.minZ - pz, 0, pz - NM_RECT.maxZ);
+    const _nmD = Math.hypot(_nmDx, _nmDz);
+    const _wantNmShadows = _nmD < 30 || (this._nmShadows && _nmD < 45);
+    if (_wantNmShadows !== this._nmShadows) {
+      this._nmShadows = _wantNmShadows;
+      for (const m of this._nmCasters) m.castShadow = _wantNmShadows;
+    }
     const intro = !this.sleeping && performance.now() < this._introUntil;
     const scripted = this.sleeping && (this.sleepPhase === 'lying' || this.sleepPhase === 'dark');
     let camTarget, desired;
