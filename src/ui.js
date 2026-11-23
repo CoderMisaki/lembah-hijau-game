@@ -19,6 +19,7 @@ import {
   HAT_MODELS, GLASSES_MODELS, SHOES_MODELS, PALETTE, FRAME_COLORS,
   defaultCustom, sanitizeCustom,
 } from './customization.js';
+import { isValidRoomCode, normalizeRoomCode } from './multiplayer.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -112,6 +113,18 @@ export class UI {
     // ---- Minimap realtime ----
     $('btn-minimap-toggle').addEventListener('click', (e) => { e.stopPropagation(); this._toggleMinimap(); });
     window.addEventListener('resize', () => { if (!this._mmCollapsed) this._drawMinimap(true); });
+    // ---- Room "Main Bareng" (NIGHT MARKET M) ----
+    this._room = { inRoom: false, code: null, players: [], selfName: null };
+    this._roomMessages = [];
+    $('btn-room').addEventListener('click', () => this.openRoom());
+    $('btn-close-room').addEventListener('click', () => this.closeRoom());
+    $('btn-room-create').addEventListener('click', () => this._createRoom());
+    $('btn-room-join').addEventListener('click', () => this._joinRoom());
+    $('room-code-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') this._joinRoom(); });
+    $('btn-room-copy').addEventListener('click', () => this._copyRoomCode());
+    $('btn-room-leave').addEventListener('click', () => this._leaveRoom());
+    $('btn-room-chat-send').addEventListener('click', () => this._sendRoomChat());
+    $('room-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') this._sendRoomChat(); });
     // ---- Kustomisasi ----
     $('btn-close-customize').addEventListener('click', () => this.closeCustomize());
     $('btn-custom-reset').addEventListener('click', () => {
@@ -130,6 +143,10 @@ export class UI {
     $('btn-jump').setAttribute('aria-label', t('jump', lang));
     $('btn-run').setAttribute('aria-label', t('run', lang));
     $('minimap-canvas').setAttribute('aria-label', t('minimapLabel', lang));
+    $('room-code-input').placeholder = t('roomJoinPlaceholder', lang);
+    $('room-chat-input').placeholder = t('roomChatPlaceholder', lang);
+    this._renderRoomState();
+    this._renderRoomChat();
     this._syncMinimapToggleLabel();
     if (this._customOptionsBuilt) this._renderCustomOptions();
   }
@@ -258,6 +275,7 @@ export class UI {
       lake: d.lake && typeof d.lake.x === 'number'
         ? { x: d.lake.x, z: d.lake.z, rx: d.lake.rx || 4, rz: d.lake.rz || 3 } : null,
       houses,
+      nightmarket: d.nightmarket || null,
       shop: this._normalizeRect(d.shop),
       farm: this._normalizeRect(d.farm),
       pen: this._normalizeRect(d.pen),
@@ -405,6 +423,31 @@ export class UI {
       ctx.lineWidth = 1.5;
       ctx.strokeRect(X(data.pen.x - data.pen.w / 2), Z(data.pen.z - data.pen.d / 2), data.pen.w * s, data.pen.d * s);
     }
+    // Pasar malam (NIGHT MARKET P): rect zona gelap hangat + garis emas +
+    // titik wahana/game + stan jajanan. Data dari world.minimapData.
+    if (data.nightmarket) {
+      const nm = data.nightmarket;
+      ctx.fillStyle = '#3a2a1a';
+      ctx.fillRect(X(nm.rect.minX), Z(nm.rect.minZ),
+        (nm.rect.maxX - nm.rect.minX) * s, (nm.rect.maxZ - nm.rect.minZ) * s);
+      ctx.strokeStyle = '#ffb340';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(X(nm.rect.minX), Z(nm.rect.minZ),
+        (nm.rect.maxX - nm.rect.minX) * s, (nm.rect.maxZ - nm.rect.minZ) * s);
+      ctx.fillStyle = '#ffb340';
+      for (const r of nm.rides) {
+        ctx.beginPath(); ctx.arc(X(r.x), Z(r.z), 2, 0, Math.PI * 2); ctx.fill();
+      }
+      if (nm.stalls) {
+        for (let z = nm.stalls.zFrom; z <= nm.stalls.zTo; z += nm.stalls.step) {
+          ctx.beginPath(); ctx.arc(X(nm.stalls.x), Z(z), 2, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      if (nm.gate) {
+        ctx.fillStyle = '#fff8dc';
+        ctx.fillRect(X(nm.gate.x) - 2, Z(nm.gate.z) - 2, 4, 4);
+      }
+    }
     // Rumah: rumah pemain emas, rumah lain kayu. Toko: daun.
     for (const h of data.houses) {
       ctx.fillStyle = h.player ? '#ffb340' : WOOD;
@@ -465,6 +508,173 @@ export class UI {
       ctx.stroke();
       ctx.restore();
     }
+    // Titik pemain lain (NIGHT MARKET M): lingkaran emas --lh-sun — bentuknya
+    // beda dari segitiga diri sendiri (yang sejak awal sudah emas; jangan
+    // diubah, verify-bigmap mengunci piksel emas di posisi pemain). Nama
+    // singkat hanya bila minimap cukup lega (cssW >= 140).
+    const remotes = this._remotePlayers();
+    if (remotes.length > 0) {
+      ctx.font = '700 10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      for (const rp of remotes) {
+        if (typeof rp.x !== 'number' || typeof rp.z !== 'number') continue;
+        const rx = X(rp.x), ry = Z(rp.z);
+        ctx.fillStyle = '#ffb340';
+        ctx.strokeStyle = '#2b2118';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(rx, ry, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        if (cssW >= 140 && rp.username) {
+          const label = String(rp.username).slice(0, 8);
+          ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,253,242,.9)';
+          ctx.strokeText(label, rx, ry - 8);
+          ctx.fillStyle = '#2b2118';
+          ctx.fillText(label, rx, ry - 8);
+        }
+      }
+    }
+  }
+  // Sumber pemain remote untuk minimap: handler getRemotePlayers (wiring
+  // koordinator di main.js) atau window.__LH_GAME.remotePlayers.
+  _remotePlayers() {
+    try {
+      if (typeof this.h.getRemotePlayers === 'function') {
+        const list = this.h.getRemotePlayers();
+        if (Array.isArray(list)) return list;
+      }
+    } catch { /* abaikan */ }
+    try {
+      const g = typeof window !== 'undefined' ? window.__LH_GAME : null;
+      if (g && Array.isArray(g.remotePlayers)) return g.remotePlayers;
+    } catch { /* abaikan */ }
+    return [];
+  }
+
+  // ---------- Room "Main Bareng" (NIGHT MARKET M) ----------
+  // UI murni: koneksi milik Multiplayer (wiring koordinator di main.js via
+  // handler onCreateRoom/onJoinRoom/onLeaveRoom/onSendChat). Semua nama dan
+  // pesan chat dirender via textContent — tidak ada innerHTML dari pemain.
+  openRoom() {
+    this._renderRoomState();
+    this._renderRoomChat();
+    $('room-modal').classList.remove('hidden');
+  }
+  closeRoom() { $('room-modal').classList.add('hidden'); }
+  _createRoom() {
+    const code = typeof this.h.onCreateRoom === 'function' ? this.h.onCreateRoom() : null;
+    if (code) this.setRoomCode(code);
+  }
+  _joinRoom() {
+    const code = normalizeRoomCode($('room-code-input').value);
+    if (!isValidRoomCode(code)) {
+      this.toast(t('roomInvalidCode', this.lang));
+      return;
+    }
+    if (typeof this.h.onJoinRoom === 'function') this.h.onJoinRoom(code);
+  }
+  _leaveRoom() {
+    if (typeof this.h.onLeaveRoom === 'function') this.h.onLeaveRoom();
+  }
+  async _copyRoomCode() {
+    const code = this._room.code;
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      // Fallback clipboard lama: textarea sementara + execCommand.
+      const ta = document.createElement('textarea');
+      ta.value = code;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch { /* abaikan */ }
+      ta.remove();
+    }
+    this.toast(t('roomCopied', this.lang));
+  }
+  _sendRoomChat() {
+    const input = $('room-chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    if (typeof this.h.onSendChat === 'function') this.h.onSendChat(text);
+  }
+  setRoomCode(code) {
+    this._room.code = code;
+    $('room-code-display').textContent = code;
+    $('room-code-box').classList.remove('hidden');
+  }
+  // state: { inRoom, code, players: [{username, self}], selfName }
+  setRoomState(state) {
+    if (!state) return;
+    this._room.inRoom = !!state.inRoom;
+    if (state.code !== undefined) this._room.code = state.code || null;
+    if (Array.isArray(state.players)) this._room.players = state.players;
+    if (state.selfName !== undefined) this._room.selfName = state.selfName || null;
+    this._renderRoomState();
+  }
+  _renderRoomState() {
+    const r = this._room;
+    const status = $('room-status');
+    if (!status) return; // setLang sebelum DOM room siap — tidak terjadi di boot normal
+    if (r.inRoom && r.code) {
+      status.textContent = t('roomInRoom', this.lang, { code: r.code, n: r.players.length });
+      $('room-code-display').textContent = r.code;
+      $('room-code-box').classList.remove('hidden');
+      $('btn-room-create').classList.add('hidden');
+      $('btn-room-leave').classList.remove('hidden');
+      $('room-join-row').classList.add('hidden');
+    } else {
+      status.textContent = t('roomSolo', this.lang);
+      $('room-code-box').classList.add('hidden');
+      $('btn-room-create').classList.remove('hidden');
+      $('btn-room-leave').classList.add('hidden');
+      $('room-join-row').classList.remove('hidden');
+    }
+    // Daftar pemain: nama via textContent; "(kamu)" untuk diri sendiri.
+    const list = $('room-players');
+    while (list.firstChild) list.removeChild(list.firstChild);
+    for (const p of r.players) {
+      const li = el('li', 'room-player');
+      const name = el('span', 'room-player-name', p.username || '');
+      li.appendChild(name);
+      if (p.self) li.appendChild(el('span', 'room-player-you', ` (${t('roomYou', this.lang)})`));
+      list.appendChild(li);
+    }
+    if (r.players.length === 0) {
+      const li = el('li', 'room-player room-player-empty', t('roomNoPlayers', this.lang));
+      list.appendChild(li);
+    }
+    // HUD: indikator "Room ABC123 • 3 pemain" hanya saat di room.
+    const ind = $('room-indicator');
+    if (r.inRoom && r.code) {
+      $('room-indicator-text').textContent = t('roomInRoom', this.lang, { code: r.code, n: r.players.length });
+      ind.classList.remove('hidden');
+    } else {
+      ind.classList.add('hidden');
+    }
+  }
+  addRoomChat(from, text) {
+    const cleanFrom = String(from || '').slice(0, 16);
+    const cleanText = String(text || '').trim().slice(0, 200);
+    if (!cleanText) return;
+    this._roomMessages.push({ from: cleanFrom, text: cleanText });
+    if (this._roomMessages.length > 5) this._roomMessages.splice(0, this._roomMessages.length - 5);
+    this._renderRoomChat();
+  }
+  _renderRoomChat() {
+    const log = $('room-chat-log');
+    if (!log) return;
+    while (log.firstChild) log.removeChild(log.firstChild);
+    if (this._roomMessages.length === 0) {
+      log.appendChild(el('p', 'room-chat-empty', t('roomChatEmpty', this.lang)));
+      return;
+    }
+    for (const m of this._roomMessages) {
+      const row = el('div', 'room-chat-row-msg');
+      row.appendChild(el('span', 'room-chat-from', `${m.from}: `));
+      row.appendChild(el('span', 'room-chat-text', m.text));
+      log.appendChild(row);
+    }
+    log.scrollTop = log.scrollHeight;
   }
 
   // ---------- Akun ----------

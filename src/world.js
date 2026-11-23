@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { terrainHeight, riverCenterX, RIVER_HALF, BRIDGE_Z, BRIDGE_DECK_Y, BRIDGE_RAMP_LEN,
          BRIDGE_DECK_MIN_X, BRIDGE_DECK_MAX_X, BRIDGE_WALK_HALF, WATER_Y, noise2, smoothstep,
-         LAKE, WINDMILL, MEADOW, ORCHARD, SQUARE } from './physics.js';
+         LAKE, WINDMILL, MEADOW, ORCHARD, SQUARE, inNightMarket } from './physics.js';
 
 export const FARM_ORIGIN = { x: 12, z: 4 };
 export const FARM_COLS = 6, FARM_ROWS = 4, FARM_SPACING = 2.8;
@@ -44,6 +44,13 @@ export function buildWorld(scene) {
     [{ x: -28, z: 6 }, { x: -40, z: 20 }, { x: -50, z: 38 }, { x: -58, z: 50 }], // ke kincir
     [{ x: 9, z: 12 }, { x: 24, z: 26 }, { x: 40, z: 40 }, { x: 48, z: 44 }],     // ke kebun buah
     [{ x: -28, z: 6 }, { x: -36, z: -14 }, { x: -44, z: -34 }, { x: -50, z: -48 }], // ke padang bunga
+    // Lane P: pasar malam, jalan baru dari kebun ke gapura (mengelilingi
+    // petak kebun dari selatan, BUKAN menembusnya), jalan utama + silang,
+    // dan keliling batas zona (garis tanah pembatas, ikut tampil di minimap).
+    [{ x: 12, z: 12 }, { x: 18, z: 17 }, { x: 36, z: 15 }, { x: 50, z: 8 }, { x: 60, z: 0 }], // kebun -> gapura
+    [{ x: 62, z: 0 }, { x: 92, z: 0 }],                  // jalan utama pasar malam
+    [{ x: 77, z: -22 }, { x: 77, z: 22 }],               // jalan silang pasar malam
+    [{ x: 58, z: -50 }, { x: 74, z: -50 }, { x: 74, z: -55 }, { x: 102, z: -55 }, { x: 102, z: 44 }, { x: 58, z: 44 }, { x: 58, z: -50 }], // batas zona (jog annex utara, koordinator)
   ];
   const PATH_SEGS = [];
   for (const p of PATHS) for (let i = 0; i < p.length - 1; i++) {
@@ -673,6 +680,7 @@ export function buildWorld(scene) {
     if (Math.hypot(x - WINDMILL.x, z - WINDMILL.z) < 7) continue;// bukit kincir
     if (x > ORCHARD.x - 14 && x < ORCHARD.x + 14 && z > ORCHARD.z - 14 && z < ORCHARD.z + 14) continue;
     if (insideHouseFootprints(x, z, 3)) continue;                // rumah desa
+    if (inNightMarket(x, z, 2)) continue;                          // pasar malam (Lane P)
     if (treeSpots.some((p) => Math.hypot(p.x - x, p.z - z) < 5)) continue;
     treeSpots.push({ x, z, s: 0.8 + rnd() * 0.6, type: TREE_TYPES[Math.floor(rnd() * 4)] });
   }
@@ -783,6 +791,7 @@ export function buildWorld(scene) {
     if (x > 8 && x < 32 && z > 0 && z < 16) continue;
     if (distToPaths(x, z) < 2.2) continue;
     if (insideHouseFootprints(x, z, 2)) continue;
+    if (inNightMarket(x, z, 2)) continue;                          // pasar malam (Lane P)
     if (Math.hypot(x - SQUARE.x, z - SQUARE.z) < 8) continue;
     if (rockSpots.some((p) => Math.hypot(p.x - x, p.z - z) < 6)) continue;
     rockSpots.push({ x, z, s: 0.5 + rnd() * 0.9 });
@@ -809,6 +818,7 @@ export function buildWorld(scene) {
     if (x > PEN.minX - 3 && x < PEN.maxX + 3 && z > PEN.minZ - 3 && z < PEN.maxZ + 3) continue;
     if (distToPaths(x, z) < 2.2) continue;
     if (insideHouseFootprints(x, z, 2)) continue;
+    if (inNightMarket(x, z, 2)) continue;                          // pasar malam (Lane P)
     if (bushSpots.some((p) => Math.hypot(p.x - x, p.z - z) < 5)) continue;
     bushSpots.push({ x, z, s: 0.5 + rnd() * 0.7 });
   }
@@ -838,6 +848,7 @@ export function buildWorld(scene) {
     if (x > PEN.minX - 3 && x < PEN.maxX + 3 && z > PEN.minZ - 3 && z < PEN.maxZ + 3) continue;
     if (distToPaths(x, z) < 2.2) continue;
     if (insideHouseFootprints(x, z, 2)) continue;
+    if (inNightMarket(x, z, 2)) continue;                          // pasar malam (Lane P)
     if (rock2Spots.some((p) => Math.hypot(p.x - x, p.z - z) < 7)) continue;
     rock2Spots.push({ x, z, s: 0.4 + rnd() * 0.8, rot: rnd() * Math.PI });
   }
@@ -870,6 +881,7 @@ export function buildWorld(scene) {
     if (Math.abs(z + 17) < 2.5 && x > -12 && x < 12) continue;
     if (distToPaths(x, z) < 2) continue;
     if (insideHouseFootprints(x, z, 2)) continue;
+    if (inNightMarket(x, z, 2)) continue;                          // pasar malam (Lane P)
     flowerSpots.push({ x, z });
   }
   // Padang bunga luas: 120 bunga padat di sekitar (-50,-55).
@@ -910,6 +922,7 @@ export function buildWorld(scene) {
     if (Math.abs(z + 17) < 2.2 && x > -12 && x < 12) continue;
     if (distToPaths(x, z) < 1.8) continue;
     if (insideHouseFootprints(x, z, 1.5)) continue;
+    if (inNightMarket(x, z, 2)) continue;                          // pasar malam (Lane P)
     grassData.push({ x, z, y: terrainHeight(x, z), s: 0.7 + rnd() * 0.9, ph: rnd() * Math.PI * 2 });
   }
   const grassTufts = new THREE.InstancedMesh(new THREE.ConeGeometry(0.09, 0.55, 4),
@@ -1067,6 +1080,32 @@ export function buildWorld(scene) {
     paths: PATHS,
     windmill: { x: WINDMILL.x, z: WINDMILL.z },
     well: { x: SQUARE.x, z: SQUARE.z },
+    // Lane P: pasar malam, rect zona + titik wahana/game terkunci.
+    // CATATAN: ui.js (_normalizeMinimapData) saat ini hanya menggambar field
+    // yang sudah dikenal: rect zona tampil lewat PATHS keliling batas +
+    // jalan utama/silang di atas; gambar rect berwarna + label butuh
+    // penambahan kecil di ui.js saat merge (lihat LANE-P-REPORT.md).
+    nightmarket: {
+      rect: { minX: 58, maxX: 103, minZ: -50, maxZ: 44 },
+      gate: { x: 60, z: 0 },
+      stage: { x: 77, z: -6 },
+      rides: [
+        { x: 70, z: -40, kind: 'bianglala' }, { x: 84, z: -40, kind: 'kora-kora' },
+        { x: 94, z: -40, kind: 'komidi' }, { x: 82, z: -48, kind: 'kursi-terbang' },
+        { x: 96, z: -48, kind: 'bom-bom' }, { x: 70, z: -32, kind: 'tagada' },
+        { x: 98, z: -32, kind: 'tong-motor' }, { x: 64, z: -39, kind: 'coaster' },
+        { x: 71, z: 35, kind: 'rumah-hantu' }, { x: 84, z: 33, kind: 'istana-balon' },
+        { x: 95, z: 33, kind: 'mandi-bola' }, { x: 88, z: 42, kind: 'rumah-kaca' },
+        { x: 64, z: 28, kind: 'trampolin' }, { x: 62, z: 18, kind: 'odong' },
+        { x: 64, z: 20, kind: 'becak' }, { x: 98, z: 10, kind: 'kolam-pancing' },
+        { x: 98, z: -12, kind: 'pen-hewan' }, { x: 77, z: 0, kind: 'badut' },
+        { x: 66, z: -12, kind: 'game' }, { x: 74, z: -12, kind: 'game' },
+        { x: 82, z: -12, kind: 'game' }, { x: 90, z: -12, kind: 'game' },
+        { x: 66, z: 12, kind: 'game' }, { x: 74, z: 12, kind: 'game' },
+        { x: 82, z: 12, kind: 'game' }, { x: 90, z: 12, kind: 'game' },
+      ],
+      stalls: { x: 92, zFrom: -20, zTo: 20, step: 4 },
+    },
   };
   const view = { fogNear: 90, fogFar: 320, camFar: 600 };
 

@@ -321,7 +321,9 @@ export class Player {
   }
   jump() {
     if (this.swimming) return false; // di air tidak bisa lompat — berenang saja
-    if (this.yOff <= 0.01) { this.vy = JUMP_VELOCITY; this.yOff = 0.01; return true; }
+    // Buff jajanan (pasar malam): jumpMul dari game.buffs, disinkron main.js
+    // tiap frame ke this.buffs (default 1 bila belum ada).
+    if (this.yOff <= 0.01) { this.vy = JUMP_VELOCITY * (this.buffs?.jumpMul || 1); this.yOff = 0.01; return true; }
     return false;
   }
   // Pose berbaring untuk urutan tidur. Menghadap selatan (facing 0) supaya
@@ -370,7 +372,12 @@ export class Player {
       this.vx += mx * ACCEL * dt;
       this.vz += mz * ACCEL * dt;
       const sp = Math.hypot(this.vx, this.vz);
-      const max = MAX_SPEED * (0.4 + 0.6 * mag) * (running ? 1.6 : 1) * (this.swimming ? 0.55 : 1);
+      // Buff jajanan (pasar malam): speedMul hanya di DARAT, swimMul hanya
+      // di AIR (kontrak merge: "renang x0,55 dengan swimMul"; "lari +15%"
+      // tidak ikut berenang). Shift (running) tetap berlaku di air (5,28).
+      const b = this.buffs || {};
+      const max = MAX_SPEED * (0.4 + 0.6 * mag) * (running ? 1.6 : 1)
+        * (this.swimming ? 0.55 * (b.swimMul || 1) : (b.speedMul || 1));
       if (sp > max) { this.vx *= max / sp; this.vz *= max / sp; }
       this.facing = Math.atan2(this.vx, this.vz);
     } else {

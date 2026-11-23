@@ -98,6 +98,7 @@ export class Sfx {
         case 'sleep': this.tone(392, 0.3, 'sine', 0.1); this.tone(330, 0.4, 'sine', 0.1, 0.25); break;
         case 'click': this.tone(700, 0.05, 'sine', 0.08); break;
         case 'error': this.tone(180, 0.15, 'sawtooth', 0.08); break;
+        case 'eat': this.tone(220, 0.07, 'triangle', 0.16); this.tone(170, 0.08, 'triangle', 0.16, 0.09); break; // kunyah (pasar malam)
         default: this.tone(440, 0.08, 'sine', 0.1); break;
       }
     } catch (e) { /* abaikan */ }

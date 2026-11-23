@@ -17,6 +17,35 @@ export const WINDMILL = { x: -58, z: 55 };                  // bukit kincir angi
 export const MEADOW = { x: -50, z: -55, rx: 18, rz: 14 };   // padang bunga (barat laut)
 export const ORCHARD = { x: 48, z: 48 };                    // kebun buah (tenggara)
 export const SQUARE = { x: 16, z: -31 };                    // alun-alun desa (utara)
+// Zona baru (Lane P): pasar malam timur (rect x 58..102, z -50..44).
+// Terrain di dalam rect diratakan menuju NM_FLAT_Y supaya wahana/game
+// berdiri di tanah datar; di LUAR rect terrainHeight tidak berubah sedikit
+// pun (mask = 0 persis di luar batas, smoothstep hanya di pita 3 m di dalam).
+export const NIGHTMARKET = { minX: 58, maxX: 103, minZ: -50, maxZ: 44 };
+export const NM_FLAT_Y = 0.6;
+export const NM_EDGE = 3; // lebar pita transisi di dalam rect
+// Annex utara (koordinator, merge 23 Nov 2026): wahana utara bom-bom car +
+// kursi terbang menjorok ke z -52..-53, DI LUAR rect utama — tanpa annex,
+// lantai arena (datar, di gy) terkubur bukit timur (terrain alami s.d. 6,6 m
+// di strip utara; terukur node). Annex OVERLAP rect utama 5 m di selatan
+// (maxZ -45 > minZ utama -50) supaya TIDAK ada seam tak-rata di z=-50:
+// mask = max keduanya. Annex di timur x>=74: danau (maks x 72) TIDAK
+// tersentuh. maxX utama 103 (bukan 102) supaya sudut timur arena (x=100)
+// mencapai mask 1 penuh — dengan 102, d=2 -> mask 0,74 -> terrain 1,85 m
+// menembus lantai arena (gy 0,6). Pagar tetap di x=102.
+export const NM_ANNEX = { minX: 74, maxX: 104, minZ: -55, maxZ: -45 };
+function rectMask(r, x, z) {
+  const d = Math.min(x - r.minX, r.maxX - x, z - r.minZ, r.maxZ - z);
+  return smoothstep(0, NM_EDGE, d); // d <= 0 (di luar rect) -> 0
+}
+export function inNightMarket(x, z, pad = 0) {
+  const inside = (r) => x > r.minX - pad && x < r.maxX + pad
+    && z > r.minZ - pad && z < r.maxZ + pad;
+  return inside(NIGHTMARKET) || inside(NM_ANNEX);
+}
+export function nightMarketMask(x, z) {
+  return Math.max(rectMask(NIGHTMARKET, x, z), rectMask(NM_ANNEX, x, z));
+}
 export const smoothstep = (a, b, x) => {
   const k = clamp((x - a) / (b - a), 0, 1);
   return k * k * (3 - 2 * k);
@@ -84,6 +113,10 @@ export function terrainHeight(x, z) {
   // Bukit kincir: gundukan gauss lembut (puncak +4,2 m, sigma 20 m).
   const hd = Math.hypot(x - WINDMILL.x, z - WINDMILL.z);
   h += 4.2 * Math.exp(-(hd * hd) / (2 * 20 * 20));
+  // Pasar malam (Lane P): ratakan menuju NM_FLAT_Y di dalam rect.
+  // Mask = 0 persis di luar rect -> nilai di luar tidak berubah sedikit pun.
+  const nm = nightMarketMask(x, z);
+  if (nm > 0) h += (NM_FLAT_Y - h) * nm;
   return h;
 }
 

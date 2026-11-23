@@ -14,12 +14,24 @@ import { Input } from './input.js';
 import { DynamicBox, terrainHeight, riverDistance, smoothstep } from './physics.js';
 import { attachDebug } from './debug.js';
 import { defaultCustom, sanitizeCustom } from './customization.js';
+// Pasar malam + multiplayer (23 Nov 2026): zona, 8 game berhadiah, wahana,
+// jajanan, room online via Supabase Realtime (ephemeral, tanpa tabel baru).
+import { buildNightMarketZone } from './nm-zone.js';
+import { buildNightMarketGames } from './nm-games.js';
+import { buildNightMarketRides } from './nm-rides.js';
+import { buildNightMarketFood } from './nm-food.js';
+import { Multiplayer } from './multiplayer.js';
 import {
   getSession, setSession, clearSession, hasPending, markPending, clearPending,
   validateUsername, validatePin, normalizeUsername,
   register as cloudRegister, login as cloudLogin, logout as cloudLogout,
   cloudGetSave, cloudPutSave, cloudDeleteSave, cloudHealth,
 } from './cloud.js';
+
+// Alias fungsi i18n t(): loop() mendeklarasikan variabel lokal `t` (elapsed
+// time, angka) yang men-shadow impor ini — pemanggilan t('...') di dalam
+// loop() HARUS memakai i18nT, kalau tidak loop mati (TypeError) sekali jalan.
+const i18nT = t;
 
 const DAY_START = 360;   // 06:00
 const DAY_END = 1320;    // 22:00
@@ -86,6 +98,11 @@ class Game {
     this._fpsAccum = 0; this._fpsFrames = 0; this._lowFpsTime = 0; this._lastDegrade = 0;
     this._saveTimer = 0;
     this._pendingCropPlot = null;
+    // Pasar malam + multiplayer (23 Nov 2026): buff jajanan + pemain remote.
+    this.buffs = { speedMul: 1, jumpMul: 1, swimMul: 1 };
+    this.remotePlayers = [];
+    this._inNightMarket = false;
+    this._nmBadge = null;
     // Urutan tidur sinematik: sleeping + sleepPhase diekspos ke window.__LH_GAME
     // untuk verifikasi headless. _sleep = { t0, phase, phaseT0, advanced, ... }.
     this.sleeping = false;
@@ -111,6 +128,33 @@ class Game {
     this.camera.position.set(6, 16, 42);
 
     this.world = buildWorld(this.scene);
+    // ---- Pasar malam (23 Nov 2026): zona + 8 game + wahana + jajanan.
+    // Collider tiap modul digabung ke world.colliders (fisika + interaksi).
+    this.nightmarket = buildNightMarketZone(this.scene, THREE, { lang: this.state.lang });
+    this.world.colliders.push(...this.nightmarket.colliders);
+    this.nmGames = buildNightMarketGames(this.scene, THREE, {
+      t: (k, lang, vars) => t(k, lang, vars),
+      lang: this.state.lang,
+      toast: (m) => this.ui?.toast(m),
+      sfx: this.sfx,
+      // Hasil game disiarkan ke room (pemain lain melihat toast menang).
+      broadcast: (type, data) => { if (this.mp) this.mp.broadcast(type, data); },
+    });
+    this.world.colliders.push(...this.nmGames.colliders);
+    this.nmRides = buildNightMarketRides(this.scene, THREE, {
+      t: (k, vars) => t(k, this.state.lang, vars),
+      lang: this.state.lang,
+      toast: (m) => this.ui?.toast(m),
+      sfx: this.sfx,
+    });
+    this.world.colliders.push(...this.nmRides.colliders);
+    this.nmFood = buildNightMarketFood(this.scene, THREE, {
+      t,
+      lang: this.state.lang,
+      toast: (m) => this.ui?.toast(m),
+      sfx: this.sfx,
+    });
+    this.world.colliders.push(...this.nmFood.colliders);
     // Geometri jauh (pegunungan) butuh far ini; langit aman via trik sky dome.
     this.camera.far = this.world.view.camFar;
     this.camera.updateProjectionMatrix();
@@ -147,6 +191,42 @@ class Game {
         data: this.world.minimapData,
       }),
     });
+    // ---- Multiplayer rooms (Main Bareng): Supabase Realtime, ephemeral —
+    // channel room:<kode>, presence = posisi/avatar, broadcast = event game.
+    // Bila Realtime tak terjangkau, game tetap jalan solo (modul toast gagal).
+    this._nmBadge = document.getElementById('nm-badge');
+    const selfName = () => this.state.username || this.session?.username || 'Tamu';
+    this.mp = new Multiplayer({
+      scene: this.scene,
+      getIdentity: () => ({ username: selfName(), gender: this.state.gender, custom: this.state.custom }),
+      onPlayers: (list) => {
+        this.remotePlayers = list.map((p) => ({ username: p.username, x: p.x, z: p.z, facing: p.facing }));
+        this.ui.setRoomState({
+          inRoom: this.mp.connected, code: this.mp.roomCode,
+          players: [{ username: selfName(), self: true },
+            ...list.map((p) => ({ username: p.username, self: false }))],
+          selfName: selfName(),
+        });
+      },
+      onEvent: (type, data) => {
+        const lang = this.state.lang;
+        if (type === 'chat') this.ui.addRoomChat(data.from, data.text);
+        else if (type === 'joined') this.ui.toast(t('roomJoined', lang, { code: data.code }));
+        else if (type === 'left') this.ui.setRoomState({ inRoom: false, code: null, players: [] });
+        else if (type === 'offline') this.ui.toast(t('roomConnectFail', lang));
+        else if (type === 'reconnecting') this.ui.toast(t('roomReconnecting', lang));
+        else if (type === 'player-joined') this.ui.toast(t('roomPlayerJoined', lang, { u: data.username }));
+        else if (type === 'player-left') this.ui.toast(t('roomPlayerLeft', lang, { u: data.username }));
+        else if (type === 'game_result' && data && data.win && data.prize > 0) {
+          this.ui.toast(t('mpGameResult', lang, { u: data.from || '?', n: data.prize }));
+        }
+      },
+    });
+    this.ui.h.onCreateRoom = () => this.mp.createRoom();
+    this.ui.h.onJoinRoom = (code) => this.mp.joinRoom(code);
+    this.ui.h.onLeaveRoom = () => this.mp.leaveRoom();
+    this.ui.h.onSendChat = (text) => { if (this.mp.sendChat(text)) this.ui.addRoomChat(selfName(), text); };
+    this.ui.h.getRemotePlayers = () => this.remotePlayers || [];
     this.ui.setLang(this.state.lang);
     this.ui.setAuthState(this.session ? this.session.username : null);
     this.ui.showStart(this._hadSave
@@ -299,7 +379,24 @@ class Game {
         const yaw = this.input.orbit.yaw;
         const cy = Math.cos(yaw), sy = Math.sin(yaw);
         const rmv = { x: mv.x * cy - mv.y * sy, y: mv.x * sy + mv.y * cy, mag: mv.mag };
-        this.player.update(dt, rmv, this.world.colliders, this.input.running);
+        // Buff jajanan (pasar malam) diterapkan ke pemain sebelum fisika gerak.
+        this.player.buffs = this.buffs;
+        if (this.nmRides.isRiding()) {
+          // Naik wahana: tempel pemain ke kursi/kabin; player.update dilewati
+          // supaya fisika jalan tidak melawan gerakan wahana.
+          const rt = this.nmRides.getRiderTransform();
+          if (rt) {
+            this.player.x = rt.x;
+            this.player.z = rt.z;
+            this.player.vx = 0; this.player.vz = 0;
+            this.player.yOff = Math.max(0, rt.y - this.player.groundAt(rt.x, rt.z));
+            this.player.group.position.set(rt.x, rt.y, rt.z);
+            this.player.group.rotation.y = rt.ry;
+            this.player.facing = rt.ry;
+          }
+        } else {
+          this.player.update(dt, rmv, this.world.colliders, this.input.running);
+        }
         // Peti: dorong bila bersentuhan.
         const crate = this.crate;
         const dx = crate.x - this.player.x, dz = crate.z - this.player.z;
@@ -310,7 +407,26 @@ class Game {
         this.world.crate.position.set(crate.x, crate.y + 0.7, crate.z);
         this.world.crate.rotation.y += (Math.hypot(crate.vx, crate.vz) * dt) * 0.4;
         this.animals.update(dt, t);
-        this.updateInteraction();
+        // Pasar malam: game/wahana/jajanan + kirim posisi ke room (~10 Hz,
+        // throttle internal di Multiplayer).
+        this.nmGames.update(dt, t, this);
+        this.nmFood.update(dt, t, this);
+        this.nmRides.update(dt, t, this);
+        if (this.mp.connected) this.mp.sendPosition(this.player.x, this.player.z, this.player.facing);
+        if (this.nmRides.isRiding()) {
+          // Naik wahana: tombol Aksi = Turun — hanya bila input tidak dikunci
+          // (wahana duduk mengunci input; keluarnya lewat tombol Turun panel).
+          if (this.input.locked) {
+            this._ctx = null;
+            this.ui.setActionLabel('');
+            this.ui.setHint('');
+          } else {
+            const rid = this.nmRides.debug.state().riding;
+            this._ctx = rid ? { type: 'nm', id: rid, label: i18nT('rideExit', this.state.lang) } : null;
+            this.ui.setActionLabel(this._ctx ? this._ctx.label : '');
+            this.ui.setHint('');
+          }
+        } else this.updateInteraction();
         // Suara air: penuh di tepi sungai, memudar sampai hilang ~22 m.
         const dRiver = riverDistance(this.player.x, this.player.z);
         const wl = dRiver <= 0 ? 1 : 1 - smoothstep(3, 22, dRiver);
@@ -323,10 +439,17 @@ class Game {
         this._saveTimer += dt;
         if (this._saveTimer > 10) { this._saveTimer = 0; this.save(); }
       }
+      this.mp.update(dt); // lerp avatar pemain lain (no-op bila tidak di room)
       this._fpsCheck(rawDt);
       this.ui.updateHUD(this.state);
     }
     this.world.update(dt, this.state.minutes);
+    // Pasar malam: animasi zona (lampu, kubah, wahana ambient) + badge.
+    this.nightmarket.update(dt, t, this.player);
+    const inNm = this.nightmarket.nightFactor > 0.5;
+    if (this._nmBadge) this._nmBadge.classList.toggle('hidden', !inNm);
+    if (this.started && inNm && !this._inNightMarket) this.ui.toast(i18nT('nmEnter', this.state.lang));
+    this._inNightMarket = inNm;
     // Kamera: intro ~4 detik (posisi pembuka, orbit diabaikan), lalu orbit
     // third-person mengikuti pemain. Selama fase 'lying'/'dark' urutan tidur,
     // kamera scripted di dalam kamar; fase lain tidur = orbit biasa.
@@ -388,6 +511,20 @@ class Game {
       ctx = { type: 'feedAll', label: t('actionFeed', this.state.lang) };
     }
     if (!ctx && nearCrate) ctx = { type: 'push', label: t('actionPush', this.state.lang) };
+    // Pasar malam: game berhadiah (r 3,2), jajanan (r 2,8), wahana (r board).
+    // Dicek setelah ctx lama supaya petak/kandang/toko/dll tetap prioritas.
+    if (!ctx && this.nmGames) {
+      const nm = this.nmGames.interactables.find((it) => Math.hypot(p.x - it.x, p.z - it.z) < it.r);
+      if (nm) ctx = { type: 'nmGame', id: nm.id, label: t(nm.labelKey, this.state.lang) };
+    }
+    if (!ctx && this.nmFood) {
+      const fd = this.nmFood.interactables.find((it) => Math.hypot(p.x - it.x, p.z - it.z) < it.r);
+      if (fd) ctx = { type: 'food', id: fd.id, label: t(fd.labelKey, this.state.lang) };
+    }
+    if (!ctx && this.nmRides) {
+      const rd = this.nmRides.interactables.find((it) => Math.hypot(p.x - it.x, p.z - it.z) < it.r);
+      if (rd) ctx = { type: 'nm', id: rd.id, label: t(rd.labelKey, this.state.lang) };
+    }
     this._ctx = ctx;
     this.ui.setActionLabel(ctx ? ctx.label : '');
     this.ui.setHint(ctx ? '' : t('hintNearPlot', this.state.lang));
@@ -434,6 +571,9 @@ class Game {
       case 'sleep': this.ui.openSleep(); break;
       case 'shop': this.ui.openShop('buy', this.state); break;
       case 'push': this.ui.toast(t('actionPush', lang)); break;
+      case 'nmGame': this.nmGames.onUse(ctx.id, this); break;
+      case 'nm': this.nmRides.onUse(ctx.id, this); break;
+      case 'food': this.nmFood.onUse(ctx.id, this); break;
       default: break;
     }
     this.ui.updateHUD(this.state);
