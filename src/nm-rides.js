@@ -18,16 +18,23 @@
 //   }
 //   ctx: { t(key), lang, toast(msg), sfx:{ play(name) } }
 //   game (saat update/onUse): game.player {x,z,yOff,vy,vx,vz,group,teleport},
-//     game.input {locked, moveVector()}, game.state.coins, game.addCoins?(n),
+//     game.input {moveVector()} (input TIDAK dikunci saat naik supaya
+//     tombol Aksi "Turun" tetap bisa ditekan), game.state.coins,
 //     game.ui?.toast, game.camera.
 //
 // Aturan main:
 //   - Biaya naik: GRATIS semua (cost 0). Memancing: dapat ikan = +2 koin.
-//   - Wahana NAIK: board -> riding (durasi 20-40 dtk atau tombol Turun) -> exit.
-//     Selama riding: input pemain dikunci (kecuali wahana KENDARAI: bom-bom &
-//     becak — input menggerakkan kendaraan), fisika jalan dinonaktifkan oleh
-//     wiring (player.update di-skip saat isRiding()), posisi pemain ditempel
-//     ke getRiderTransform() tiap frame.
+//   - Wahana NAIK: board -> riding (tanpa batas waktu — jalan terus
+//     sampai pemain menekan Turun) -> exit. Tidak ada panel tengah layar;
+//     satu-satunya kontrol keluar = tombol Aksi ("Turun") di touch controls
+//     / tombol E di desktop (input TIDAK dikunci saat naik supaya tombol
+//     Aksi tetap bisa ditekan; gerak pemain tetap mati karena player.update
+//     dilewati selama naik, lihat wiring di main.js).
+//     Selama riding: input TIDAK dikunci (supaya tombol Aksi "Turun" tetap
+//     bisa ditekan); fisika jalan dinonaktifkan oleh wiring (player.update
+//     di-skip saat isRiding()), posisi pemain ditempel ke getRiderTransform()
+//     tiap frame. Wahana KENDARAI (bom-bom & becak): input menggerakkan
+//     kendaraan.
 //   - Tanah: tiap struktur mengambil terrainHeight() di anchornya sendiri,
 //     jadi tetap duduk benar baik di worktree ini (belum di-flatten) maupun
 //     setelah Lane P meratakan zona ke h~0.6.
@@ -255,7 +262,6 @@ function makeFerris() {
     // tidak pernah bisa berdiri di sana (fisika mendorong keluar ke z=-36.9)
     // dan exit pun terdorong keluar. (76,-33) bersih dari semua collider.
     board: { x: 76, z: -33, r: 3 }, exit: { x: 76, z: -33 },
-    dur: 30, driving: false,
     boardFn() { st.angle = Math.PI; st.fast = true; return true; },
     update(dt) {
       const target = st.fast ? TAU / 30 : TAU / 60;
@@ -314,7 +320,6 @@ function makePirate() {
     id: 'pirate', group: g,
     colliders: [{ minX: 81, maxX: 87, minZ: -41.5, maxZ: -38.5 }],
     board: { x: 84, z: -35.5, r: 3 }, exit: { x: 84, z: -35.5 },
-    dur: 24, driving: false,
     boardFn() { st.phase = 0; st.riding = true; return true; },
     update(dt) {
       const target = st.riding ? 0.62 : 0.08;
@@ -374,7 +379,6 @@ function makeCarousel() {
     id: 'carousel', group: g,
     colliders: [{ minX: 90.2, maxX: 97.8, minZ: -43.8, maxZ: -36.2 }],
     board: { x: 94, z: -35, r: 3 }, exit: { x: 94, z: -35 },
-    dur: 24, driving: false,
     boardFn() { st.angle = -Math.PI / 2; return true; },
     update(dt) {
       st.angle += st.speed * dt;
@@ -428,7 +432,6 @@ function makeChairs() {
     id: 'chairs', group: g,
     colliders: [{ minX: 79.2, maxX: 84.8, minZ: -50.8, maxZ: -45.2 }],
     board: { x: 82, z: -42.5, r: 3 }, exit: { x: 82, z: -42.5 },
-    dur: 24, driving: false,
     boardFn() { st.riding = true; return true; },
     update(dt) {
       const target = st.riding ? TAU / 8 : TAU / 40;
@@ -482,7 +485,6 @@ function makeTagada() {
     id: 'tagada', group: g,
     colliders: [{ minX: 65.6, maxX: 74.4, minZ: -36.4, maxZ: -27.6 }],
     board: { x: 70, z: -26.5, r: 3 }, exit: { x: 70, z: -26.5 },
-    dur: 20, driving: false,
     boardFn() { st.riding = true; return true; },
     update(dt) {
       st.angle += dt * (TAU / 6);
@@ -610,7 +612,6 @@ function makeBumper() {
       { minX: 99.2, maxX: 100, minZ: -52, maxZ: -44 },
     ],
     board: { x: 96, z: -43.5, r: 3 }, exit: { x: 96, z: -43.5 },
-    dur: 30, driving: true,
     boardFn() { st.driving = true; return true; },
     update(dt, game) {
       st.t += dt;
@@ -673,7 +674,7 @@ function makeCoaster() {
     g.add(cg);
     cars.push(cg);
   }
-  const st = { s: 0, dwell: 4, laps: 0, riding: false, lapsAtBoard: 0 };
+  const st = { s: 0, dwell: 4, laps: 0 };
   function placeCars() {
     for (let i = 0; i < 3; i++) {
       const p = ovalPoint(st.s - i * 2.4);
@@ -686,11 +687,8 @@ function makeCoaster() {
     id: 'coaster', group: g,
     colliders: [{ minX: 60, maxX: 62, minZ: -40, maxZ: -38 }],
     board: { x: 64, z: -36, r: 3 }, exit: { x: 64, z: -36 },
-    dur: null, driving: false,
     boardFn() {
       if (st.dwell <= 0) return false; // kereta sedang jalan
-      st.riding = true;
-      st.lapsAtBoard = st.laps;
       return true;
     },
     update(dt) {
@@ -710,8 +708,7 @@ function makeCoaster() {
       const p = ovalPoint(st.s);
       return { x: p.x, y: TY + 0.45, z: p.z, ry: Math.atan2(p.dx, p.dz) };
     },
-    finished() { return st.riding && st.laps > st.lapsAtBoard && st.dwell > 0; },
-    unboard() { st.riding = false; },
+    unboard() {},
     debug() { return { s: st.s, dwell: st.dwell, laps: st.laps }; },
   };
 }
@@ -778,8 +775,7 @@ function makeLoopTrain(kind) {
     veh.add(car);
   }
   g.add(veh);
-  const st = { s: isTrain ? 0 : 76, dwell: isTrain ? 5 : 0, laps: 0,
-               riding: false, lapsAtBoard: 0 };
+  const st = { s: isTrain ? 0 : 76, dwell: isTrain ? 5 : 0, laps: 0 };
   function place() {
     const p = rectLoopPoint(st.s);
     veh.position.set(p.x, gy + 0.15, p.z);
@@ -791,11 +787,8 @@ function makeLoopTrain(kind) {
     colliders: isTrain ? [{ minX: 59.3, maxX: 60.7, minZ: 17, maxZ: 19 }] : [],
     board: isTrain ? { x: 62, z: 16.5, r: 3 } : { x: 62, z: 19.5, r: 3 },
     exit: { x: 62, z: 18 },
-    dur: null, driving: false,
     boardFn() {
       if (st.dwell <= 0) return false;
-      st.riding = true;
-      st.lapsAtBoard = st.laps;
       return true;
     },
     update(dt) {
@@ -815,8 +808,7 @@ function makeLoopTrain(kind) {
       const p = rectLoopPoint(st.s);
       return { x: p.x, y: gy + 0.5, z: p.z, ry: Math.atan2(p.dx, p.dz) };
     },
-    finished() { return st.riding && st.laps > st.lapsAtBoard && st.dwell > 0; },
-    unboard() { st.riding = false; },
+    unboard() {},
     debug() { return { s: st.s, dwell: st.dwell, laps: st.laps }; },
   };
 }
@@ -853,7 +845,6 @@ function makeBecak() {
     id: 'becak', group: g,
     colliders: [],
     board: { x: 64, z: 20, r: 3 }, exit: { x: 64, z: 20 },
-    dur: null, driving: true,
     boardFn() { st.driving = true; return true; },
     update(dt, game) {
       if (!st.driving) return;
@@ -960,7 +951,6 @@ function makeHaunted() {
       { minX: 62.7, maxX: 63.3, minZ: 37, maxZ: 40 },
     ],
     board: { x: 62, z: 35, r: 3 }, exit: { x: 61, z: 35 },
-    dur: null, driving: false,
     isInside: (game) => inside(game?.player),
     update(dt, game, H) {
       const p = game?.player;
@@ -1738,25 +1728,13 @@ export function buildNightMarketRides(scene, THREE, ctx = {}) {
     return s;
   };
 
-  // ---------- DOM: panel wahana + overlay gelap rumah hantu ----------
-  // Keduanya menempel di #game-container (bukan body): overlay gelap duduk
-  // di z-index 4 — di atas kanvas, di bawah HUD (5) — jadi HUD/toast tetap
-  // terbaca; panel di z 35 — di atas toast (30), di bawah overlay orientasi (40).
+  // ---------- DOM: overlay gelap rumah hantu ----------
+  // Menempel di #game-container (bukan body): overlay gelap duduk di
+  // z-index 4 — di atas kanvas, di bawah HUD (5) — jadi HUD/toast tetap
+  // terbaca. (Dulu ada panel wahana tengah layar di sini — dihapus
+  // 2026-11-23 atas permintaan Izka: menutupi layar saat naik wahana.
+  // Keluar wahana hanya lewat tombol Aksi "Turun".)
   const host = document.getElementById('game-container') || document.body;
-  const panel = document.createElement('div');
-  panel.id = 'nm-ride-panel';
-  panel.className = 'nm-ride-panel hidden';
-  panel.setAttribute('role', 'status');
-  const panelTitle = document.createElement('div');
-  panelTitle.className = 'nm-ride-title';
-  const panelStatus = document.createElement('div');
-  panelStatus.className = 'nm-ride-status';
-  const exitBtn = document.createElement('button');
-  exitBtn.type = 'button';
-  exitBtn.className = 'nm-exit-btn';
-  exitBtn.textContent = tr('rideExit');
-  panel.append(panelTitle, panelStatus, exitBtn);
-  host.appendChild(panel);
 
   const darkEl = document.createElement('div');
   darkEl.id = 'nm-dark';
@@ -1802,32 +1780,8 @@ export function buildNightMarketRides(scene, THREE, ctx = {}) {
   const S = {
     animT: 0, timeScale: 1, current: null, game: null,
     trampBoosted: false, darkCur: 0, npcCd: {}, clownLine: 0,
-    lastTitle: '', lastStatus: '',
   };
   const H = () => ({ t: tr, toast, sfx, now: S.animT });
-
-  function showPanel(entry) {
-    panelTitle.textContent = tr(entry.def.labelKey);
-    panelStatus.textContent = '';
-    S.lastTitle = panelTitle.textContent;
-    S.lastStatus = '';
-    panel.classList.remove('hidden');
-  }
-  function hidePanel() { panel.classList.add('hidden'); }
-  function updatePanel() {
-    if (!S.current) return;
-    const { entry, t0 } = S.current;
-    let status = '';
-    if (entry.dur != null) {
-      const left = Math.max(0, Math.ceil(entry.dur - (S.animT - t0)));
-      status = tr('rideTimeLeft', { n: left });
-    } else if (entry.driving) {
-      status = tr('rideDriving');
-    } else if (entry.finished) {
-      status = tr('rideLap');
-    }
-    if (status !== S.lastStatus) { panelStatus.textContent = status; S.lastStatus = status; }
-  }
 
   function stopRide() {
     if (!S.current) return false;
@@ -1835,14 +1789,11 @@ export function buildNightMarketRides(scene, THREE, ctx = {}) {
     S.current = null;
     try { entry.unboard?.(); } catch (e) { /* abaikan */ }
     const g = S.game;
-    if (g?.input) g.input.locked = false;
     if (g?.player?.teleport) g.player.teleport(entry.exit.x, entry.exit.z);
-    hidePanel();
     toast(tr('rideExited'));
     sfx.play('click');
     return true;
   }
-  exitBtn.addEventListener('click', () => stopRide());
 
   function onUse(id, game) {
     if (game) S.game = game;
@@ -1871,10 +1822,12 @@ export function buildNightMarketRides(scene, THREE, ctx = {}) {
       toast(tr('rideWait'));
       return false;
     }
-    S.current = { entry, t0: S.animT };
-    if (game?.input) game.input.locked = !entry.driving;
+    S.current = { entry };
+    // Input TIDAK dikunci saat naik: tombol Aksi ("Turun") harus tetap bisa
+    // ditekan untuk keluar — itu satu-satunya jalan keluar sekarang (tidak
+    // ada lagi panel tengah layar). Gerak pemain tetap mati karena
+    // player.update dilewati selama naik (wiring main.js).
     if (game?.player) { game.player.vx = 0; game.player.vz = 0; }
-    showPanel(entry);
     toast(tr('rideBoard', { name: tr(entry.def.labelKey) }));
     sfx.play('click');
     return true;
@@ -1927,13 +1880,9 @@ export function buildNightMarketRides(scene, THREE, ctx = {}) {
       }
     }
 
-    // --- Timer wahana: durasi habis / putaran selesai -> turun otomatis ---
-    if (S.current) {
-      const { entry, t0 } = S.current;
-      if (entry.dur != null && S.animT - t0 >= entry.dur) stopRide();
-      else if (typeof entry.finished === 'function' && entry.finished()) stopRide();
-      else updatePanel();
-    }
+    // Wahana jalan tanpa batas waktu — hanya tombol Turun yang mengakhiri.
+    // (Dulu: auto-stop saat durasi habis / satu putaran selesai. Dihapus
+    // 2026-11-23 atas permintaan Izka: nikmati wahana tanpa limit waktu.)
   }
 
   return {

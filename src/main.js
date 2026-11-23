@@ -206,6 +206,7 @@ class Game {
     // channel room:<kode>, presence = posisi/avatar, broadcast = event game.
     // Bila Realtime tak terjangkau, game tetap jalan solo (modul toast gagal).
     this._nmBadge = document.getElementById('nm-badge');
+    this._touchControls = document.getElementById('touch-controls');
     const selfName = () => this.state.username || this.session?.username || 'Tamu';
     this.mp = new Multiplayer({
       scene: this.scene,
@@ -435,19 +436,29 @@ class Game {
         this.nmRides.update(dt, t, this);
         if (this.mp.connected) this.mp.sendPosition(this.player.x, this.player.z, this.player.facing);
         if (this.nmRides.isRiding()) {
-          // Naik wahana: tombol Aksi = Turun — hanya bila input tidak dikunci
-          // (wahana duduk mengunci input; keluarnya lewat tombol Turun panel).
-          if (this.input.locked) {
-            this._ctx = null;
-            this.ui.setActionLabel('');
-            this.ui.setHint('');
-          } else {
-            const rid = this.nmRides.debug.state().riding;
-            this._ctx = rid ? { type: 'nm', id: rid, label: i18nT('rideExit', this.state.lang) } : null;
-            this.ui.setActionLabel(this._ctx ? this._ctx.label : '');
-            this.ui.setHint('');
+          // Naik wahana: tombol Aksi = Turun — selalu aktif, untuk SEMUA
+          // wahana (duduk maupun kendaraan). Ini satu-satunya jalan keluar
+          // sejak panel tengah layar dihapus (2026-11-23); input tidak
+          // dikunci saat naik supaya tombol ini tetap bisa ditekan.
+          const rid = this.nmRides.debug.state().riding;
+          this._ctx = rid ? { type: 'nm', id: rid, label: i18nT('rideExit', this.state.lang) } : null;
+          this.ui.setActionLabel(this._ctx ? this._ctx.label : '');
+          this.ui.setHint('');
+          // Desktop (tanpa sentuh): kontrol sentuh normalnya tersembunyi —
+          // tampilkan HANYA tombol Aksi "Turun" supaya tetap ada jalan
+          // keluar dengan mouse. (Dulu jalan keluar desktop adalah tombol
+          // di panel tengah layar yang sudah dihapus.)
+          if (this._touchControls && !this._isTouch) {
+            this._touchControls.classList.remove('hidden');
+            this._touchControls.classList.add('riding-exit');
           }
-        } else this.updateInteraction();
+        } else {
+          if (this._touchControls && !this._isTouch) {
+            this._touchControls.classList.add('hidden');
+            this._touchControls.classList.remove('riding-exit');
+          }
+          this.updateInteraction();
+        }
         // Suara air: penuh di tepi sungai, memudar sampai hilang ~22 m.
         const dRiver = riverDistance(this.player.x, this.player.z);
         const wl = dRiver <= 0 ? 1 : 1 - smoothstep(3, 22, dRiver);

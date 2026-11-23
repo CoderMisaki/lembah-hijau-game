@@ -248,6 +248,12 @@ h1, h2 {
   transform: translate(-50%, -50%);
 }
 #action-buttons { position: absolute; right: 18px; bottom: 22px; display: flex; gap: 14px; align-items: flex-end; pointer-events: auto; }
+/* Naik wahana di desktop (tanpa sentuh): kontrol sentuh normalnya
+   tersembunyi — kelas riding-exit (ditambah main.js selama naik) hanya
+   menampilkan tombol Aksi "Turun"; joystick/Lari/Lompat tetap sembunyi. */
+#touch-controls.riding-exit #joystick,
+#touch-controls.riding-exit #btn-run,
+#touch-controls.riding-exit #btn-jump { display: none; }
 .round-btn {
   width: 64px; height: 64px; border-radius: 50%; border: 2px solid var(--lh-wood);
   background: var(--lh-paper); font-size: 26px; color: var(--lh-bark); min-height: 64px;
@@ -667,16 +673,7 @@ h1, h2 {
 
 /* NIGHT MARKET R — start */
 #nm-dark { position: absolute; inset: 0; z-index: 4; background: #0a0618; opacity: 0; pointer-events: none; transition: opacity .8s ease; }
-.nm-ride-panel { position: absolute; top: 64px; left: 50%; transform: translateX(-50%); z-index: 35; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: calc(100vw - 24px); padding: 12px 16px; background: var(--lh-paper); border: 2px solid var(--lh-wood); border-radius: 18px; box-shadow: var(--lh-shadow); /* taste-skill-ignore: ride panel is a real overlay above the game, like the toast */ text-align: center; }
-.nm-ride-title { font-family: var(--lh-display); font-weight: 700; font-size: 20px; line-height: 1.2; color: var(--lh-ink); text-wrap: balance; }
-.nm-ride-status { font-size: 14px; line-height: 1.4; color: var(--lh-bark); font-variant-numeric: tabular-nums; }
-.nm-exit-btn { min-height: 44px; min-width: 120px; padding: 8px 24px; border: none; border-radius: 12px; background: var(--lh-leaf); color: var(--lh-white); font: 800 16px/1.2 var(--lh-text); cursor: pointer; touch-action: manipulation; transition: transform var(--lh-t-fast) var(--lh-ease), background-color var(--lh-t-fast) var(--lh-ease); }
-.nm-exit-btn:hover { background: var(--lh-leaf-dark); }
-.nm-exit-btn:active { transform: scale(.97); }
-.nm-exit-btn:focus-visible { outline: 3px solid var(--lh-sun); outline-offset: 2px; }
-.nm-ride-panel.hidden { display: none; }
-@media (max-width: 768px) { .nm-ride-panel { top: 56px; padding: 8px 12px; } .nm-ride-title { font-size: 17px; } }
-@media (prefers-reduced-motion: reduce) { #nm-dark { transition: none; } .nm-exit-btn:active { transform: none; } }
+@media (prefers-reduced-motion: reduce) { #nm-dark { transition: none; } }
 /* NIGHT MARKET R — end */
 
 /* NIGHT MARKET F — start
