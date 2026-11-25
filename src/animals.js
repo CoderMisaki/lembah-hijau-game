@@ -4,21 +4,21 @@
 // Sapi -> Susu (jual 15). Hewan berkeliaran di kandang + hindari pagar.
 import * as THREE from 'three';
 import { terrainHeight, clamp } from './physics.js';
-import { PEN } from './world.js';
+import { PEN, toonMat, addOutline } from './world.js';
 
 export const ANIMAL_DEFS = {
   ayam: { name: 'Ayam', icon: 'chicken', produce: 'egg', produceName: 'Telur', sell: 8, count: 3 },
   sapi: { name: 'Sapi', icon: 'cow', produce: 'milk', produceName: 'Susu', sell: 15, count: 2 },
 };
 
-function mat(color) { return new THREE.MeshLambertMaterial({ color }); }
+function mat(color, opts = {}) { return toonMat(color, opts); }
 
 function buildChicken() {
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.SphereGeometry(0.34, 10, 8), mat(0xf5f0e6));
-  body.scale.y = 0.85; body.position.y = 0.42; body.castShadow = true; g.add(body);
+  body.scale.y = 0.85; body.position.y = 0.42; body.castShadow = true; addOutline(body); g.add(body);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), mat(0xf5f0e6));
-  head.position.set(0, 0.78, 0.22); g.add(head);
+  head.position.set(0, 0.78, 0.22); addOutline(head); g.add(head);
   const beak = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.16, 6), mat(0xe8912a));
   beak.rotation.x = Math.PI / 2; beak.position.set(0, 0.76, 0.44); g.add(beak);
   const comb = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.18), mat(0xd9382b));
@@ -35,9 +35,9 @@ function buildChicken() {
 function buildCow() {
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.8, 0.7), mat(0x8a5a3b));
-  body.position.y = 0.85; body.castShadow = true; g.add(body);
+  body.position.y = 0.85; body.castShadow = true; addOutline(body); g.add(body);
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.5), mat(0x8a5a3b));
-  head.position.set(0.85, 1.05, 0); g.add(head);
+  head.position.set(0.85, 1.05, 0); addOutline(head); g.add(head);
   const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.35, 0.42), mat(0xe8c9a8));
   muzzle.position.set(1.15, 0.9, 0); g.add(muzzle);
   // Bercak coklat gelap di badan + ambing + lonceng leher.

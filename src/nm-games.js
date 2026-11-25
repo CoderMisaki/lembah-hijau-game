@@ -1,5 +1,11 @@
 // nm-games.js — Lane G: 8 game berhadiah pasar malam ("Lembah Hijau").
 //
+// Restyle visual Lane D (anime overhaul, 25 Nov 2026): semua permukaan
+// MeshToonMaterial + gradientMap 4-step (cel), palet langit/sakura/
+// matahari PRODUCT.md, papan nama + angka roda display rounded, SFX khas
+// lembah ("YEAY!"/"DUAR!") + burst kelopak saat menang. Logika, ekonomi,
+// peluang, teks, koordinat TIDAK berubah.
+//
 // Antarmuka (koordinator wiring ke main.js — lihat LANE-G-REPORT.md):
 //   NM_GAMES: [{ id, x, z, cost, labelKey }] — 8 stan, anchor terkunci.
 //   buildNightMarketGames(scene, THREE, ctx) -> {
@@ -186,13 +192,13 @@ function signTexture(THREE, ctx, def) {
   const idName = ctx.t(def.labelKey, 'id');
   const enName = ctx.t(def.labelKey, 'en');
   return canvasTex(THREE, 512, 128, (g, w, h) => {
-    g.fillStyle = '#fff8dc'; g.fillRect(0, 0, w, h);
-    g.strokeStyle = '#8a6b3f'; g.lineWidth = 10; g.strokeRect(5, 5, w - 10, h - 10);
-    g.fillStyle = '#2b2118'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.font = '700 52px Georgia, serif';
+    g.fillStyle = '#fff6e5'; g.fillRect(0, 0, w, h); // --lh-paper
+    g.strokeStyle = '#1d2b53'; g.lineWidth = 10; g.strokeRect(5, 5, w - 10, h - 10); // outline tinta
+    g.fillStyle = '#1d2b53'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = '800 52px "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "Trebuchet MS", system-ui, sans-serif';
     g.fillText(idName, w / 2, 48);
-    g.fillStyle = '#4a3419';
-    g.font = '700 26px Georgia, serif';
+    g.fillStyle = '#ff5c8a'; // --lh-sakura-deep
+    g.font = '800 26px "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "Trebuchet MS", system-ui, sans-serif';
     g.fillText(enName, w / 2, 96);
   });
 }
@@ -208,17 +214,86 @@ function canopyTexture(THREE, accent) {
   });
 }
 
-// Warna aksen tiap stan (kain atap + detail).
+// ---- Cel/toon anime (Lane D restyle, PRODUCT.md § Dunia 3D) ----
+// Semua permukaan MeshToonMaterial + gradientMap 4-step. MeshBasicMaterial
+// dipertahankan hanya untuk teks/angka di atas tekstur dan tracer.
+let _toonGrad = null;
+function toonGrad(THREE) {
+  if (_toonGrad) return _toonGrad;
+  const tex = new THREE.DataTexture(new Uint8Array([90, 150, 210, 255]), 4, 1, THREE.RedFormat);
+  tex.minFilter = THREE.NearestFilter;
+  tex.magFilter = THREE.NearestFilter;
+  tex.needsUpdate = true;
+  _toonGrad = tex;
+  return tex;
+}
+
+// ---- SFX onomatopoeia + burst kelopak (Lane D; PRODUCT.md § Motion) ----
+// Teks SFX khas lembah, partikel = kelopak sakura + daun + bintang — BUKAN
+// asap/shard Sakuga. Hanya di momen menang (satu authored moment per
+// ronde). Mati bila prefers-reduced-motion.
+const LH_REDUCED = typeof matchMedia === 'function'
+  && matchMedia('(prefers-reduced-motion: reduce)').matches;
+function lhFxCss() {
+  if (typeof document === 'undefined' || document.getElementById('lh-fx-style-games')) return;
+  const st = document.createElement('style');
+  st.id = 'lh-fx-style-games';
+  st.textContent = '.lh-sfx-nm{position:fixed;left:50%;top:38%;z-index:60;pointer-events:none;font-family:"Arial Rounded MT Bold","Hiragino Maru Gothic ProN","Hiragino Sans","Trebuchet MS",system-ui,sans-serif;font-weight:800;font-style:italic;font-size:clamp(34px,6vw,52px);letter-spacing:.02em;color:#ffc93c;-webkit-text-stroke:2px #1d2b53;text-shadow:4px 4px 0 rgba(29,43,83,.9);transform:translate(-50%,-50%) rotate(-6deg);animation:lh-sfx-nm-pop .9s cubic-bezier(.34,1.56,.64,1) forwards}'
+    + '@keyframes lh-sfx-nm-pop{0%{transform:translate(-50%,-50%) scale(.35) rotate(-12deg);opacity:0}25%{opacity:1;transform:translate(-50%,-50%) scale(1.18) rotate(-3deg)}55%{transform:translate(-50%,-50%) scale(1) rotate(-6deg);opacity:1}100%{transform:translate(-50%,-62%) scale(1.04) rotate(-6deg);opacity:0}}'
+    + '.lh-petal{position:fixed;z-index:60;pointer-events:none;animation:lh-petal-fly .9s ease-out forwards}'
+    + '@keyframes lh-petal-fly{to{transform:translate(var(--dx,0px),var(--dy,-60px)) rotate(var(--rot,180deg)) scale(.55);opacity:0}}'
+    + '#nm-modal .primary-btn:active{transform:scale(.93)}'
+    + '@media (prefers-reduced-motion:reduce){.lh-sfx-nm,.lh-petal{animation:none!important;display:none!important}}';
+  document.head.appendChild(st);
+}
+function lhBurst(host) {
+  const cols = ['#ff8fb3', '#ffc93c', '#2fbf4a', '#ff5c8a'];
+  const shapes = ['50% 0 50% 50%', '50%', '0 50% 50% 50%']; // kelopak / bulat / daun
+  for (let i = 0; i < 10; i++) {
+    const p = document.createElement('span');
+    p.className = 'lh-petal';
+    p.setAttribute('aria-hidden', 'true');
+    const a = Math.random() * Math.PI * 2, d = 60 + Math.random() * 90;
+    p.style.setProperty('--dx', `${Math.cos(a) * d}px`);
+    p.style.setProperty('--dy', `${Math.sin(a) * d - 40}px`);
+    p.style.setProperty('--rot', `${(Math.random() * 360) | 0}deg`);
+    p.style.left = '50%';
+    p.style.top = '38%';
+    p.style.background = cols[i % cols.length];
+    p.style.borderRadius = shapes[i % shapes.length];
+    const s = 9 + Math.random() * 7;
+    p.style.width = `${s}px`;
+    p.style.height = `${s * 0.8}px`;
+    host.appendChild(p);
+    setTimeout(() => p.remove(), 950);
+  }
+}
+function lhSfx(text) {
+  if (LH_REDUCED || typeof document === 'undefined') return;
+  lhFxCss();
+  const host = document.getElementById('game-container') || document.body;
+  const el = document.createElement('div');
+  el.className = 'lh-sfx-nm';
+  el.textContent = text;
+  el.setAttribute('aria-hidden', 'true');
+  host.appendChild(el);
+  lhBurst(host);
+  setTimeout(() => el.remove(), 950);
+}
+
+// Warna aksen tiap stan (kain atap + detail) — token anime PRODUCT.md.
 const ACCENT = {
-  ring: '#c0392b', dart: '#2e7d32', duck: '#d98e04', basket: '#e4572e',
-  shoot: '#8a6b3f', cans: '#8e2f32', wheel: '#b3261e', pusher: '#2e7d32',
+  ring: '#ff5c8a', dart: '#2fbf4a', duck: '#ffc93c', basket: '#ff9f1c',
+  shoot: '#8a6b3f', cans: '#1e6fd9', wheel: '#ff8fb3', pusher: '#2fbf4a',
 };
-const WHEEL_COLORS = ['#d64550', '#ffb340', '#2e7d32', '#e8833a',
-  '#5da244', '#f2a541', '#b3261e', '#8a6b3f'];
+const WHEEL_COLORS = ['#ff5c8a', '#ffc93c', '#2fbf4a', '#ff9f1c',
+  '#3fa9f5', '#ff8fb3', '#1e6fd9', '#8a6b3f'];
 
 // ---- Pembangun stan 3D ----------------------------------------------------
 function stdMat(THREE, color, opts = {}) {
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.02, ...opts });
+  // Cel: kunci Standard (roughness/metalness) dibuang — toon tidak mengenalnya.
+  const { roughness, metalness, ...rest } = opts;
+  return new THREE.MeshToonMaterial({ color, gradientMap: toonGrad(THREE), ...rest });
 }
 function box(THREE, parent, w, h, d, color, x, y, z, opts = {}) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), stdMat(THREE, color, opts));
@@ -258,7 +333,7 @@ function buildStallShell(THREE, parent, ctx, def) {
   }
   const canopy = new THREE.Mesh(
     new THREE.PlaneGeometry(3.6, 2.2),
-    new THREE.MeshStandardMaterial({ map: canopyTexture(THREE, ACCENT[def.id]), roughness: 0.9, side: THREE.DoubleSide }),
+    new THREE.MeshToonMaterial({ map: canopyTexture(THREE, ACCENT[def.id]), gradientMap: toonGrad(THREE), side: THREE.DoubleSide }),
   );
   canopy.position.set(0, 2.75, 0.15);
   canopy.rotation.x = -Math.PI / 2 + 0.35; // miring: depan lebih rendah
@@ -267,15 +342,15 @@ function buildStallShell(THREE, parent, ctx, def) {
   // Papan nama di depan atas.
   const sign = new THREE.Mesh(
     new THREE.PlaneGeometry(2.6, 0.65),
-    new THREE.MeshStandardMaterial({ map: signTexture(THREE, ctx, def), roughness: 0.85 }),
+    new THREE.MeshToonMaterial({ map: signTexture(THREE, ctx, def), gradientMap: toonGrad(THREE) }),
   );
   sign.position.set(0, 2.55, 1.02);
   g.add(sign);
   // Lampu kecil (bola emissive hangat) di kedua ujung depan.
   const lamps = [];
   for (const lx of [-1.5, 1.5]) {
-    const lampMat = new THREE.MeshStandardMaterial({
-      color: 0xffd27a, emissive: 0xffb340, emissiveIntensity: 1.4, roughness: 0.4,
+    const lampMat = new THREE.MeshToonMaterial({
+      color: 0xffd27a, emissive: 0xffb340, emissiveIntensity: 1.4, gradientMap: toonGrad(THREE),
     });
     const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), lampMat);
     lamp.position.set(lx, 2.42, 0.95);
@@ -302,7 +377,7 @@ function buildGameProps(THREE, shell, def) {
       refs.rings = [];
       for (let i = 0; i < 3; i++) {
         const ring = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.045, 8, 20),
-          stdMat(THREE, [0xc0392b, 0x2e7d32, 0xd98e04][i]));
+          stdMat(THREE, [0xff5c8a, 0x2fbf4a, 0xff9f1c][i]));
         ring.position.set(1.25, tableY + 0.06 + i * 0.09, 0.35);
         ring.rotation.x = Math.PI / 2;
         ring.castShadow = true;
@@ -315,7 +390,7 @@ function buildGameProps(THREE, shell, def) {
       // Papan belakang + 5 balon warna-warni.
       box(THREE, g, 2.4, 1.7, 0.08, 0x6b4e2a, 0, 2.0, -0.55);
       refs.balloons = [];
-      const cols = [0xd64550, 0x2e7d32, 0x1f6fb2, 0xd98e04, 0xb3261e];
+      const cols = [0xff5c8a, 0x2fbf4a, 0x1e6fd9, 0xff9f1c, 0xff5c8a];
       const spots = [[-0.9, 1.75], [-0.45, 2.25], [0, 1.7], [0.45, 2.3], [0.9, 1.8]];
       spots.forEach(([bx, by], i) => {
         const b = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 10),
@@ -337,7 +412,7 @@ function buildGameProps(THREE, shell, def) {
     }
     case 'duck': {
       // Kolam kecil di atas meja + 5 bebek yang berenang melingkar.
-      const pond = cyl(THREE, g, 0.95, 0.95, 0.22, 0x3f8fbf, 0, tableY + 0.08, 0.1, { roughness: 0.25 }, 20);
+      const pond = cyl(THREE, g, 0.95, 0.95, 0.22, 0x3fa9f5, 0, tableY + 0.08, 0.1, { roughness: 0.25 }, 20);
       pond.receiveShadow = true;
       refs.pond = pond;
       refs.ducks = [];
@@ -353,7 +428,7 @@ function buildGameProps(THREE, shell, def) {
         head.position.set(0.16, 0.1, 0);
         duck.add(head);
         const beak = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.1, 6),
-          stdMat(THREE, 0xe4572e));
+          stdMat(THREE, 0xff9f1c));
         beak.rotation.z = -Math.PI / 2;
         beak.position.set(0.27, 0.1, 0);
         duck.add(beak);
@@ -381,7 +456,7 @@ function buildGameProps(THREE, shell, def) {
       cyl(THREE, g, 0.07, 0.07, 1.9, 0x4a3419, 0, 1.95, -0.55);
       box(THREE, g, 1.1, 0.9, 0.06, 0xfff8dc, 0, 2.7, -0.55);
       const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.035, 8, 20),
-        stdMat(THREE, 0xd64550, { metalness: 0.4, roughness: 0.4 }));
+        stdMat(THREE, 0xff5c8a, { metalness: 0.4, roughness: 0.4 }));
       hoop.rotation.x = Math.PI / 2;
       hoop.position.set(0, 2.32, -0.2);
       hoop.castShadow = true;
@@ -391,7 +466,7 @@ function buildGameProps(THREE, shell, def) {
       refs.balls = [];
       for (let i = 0; i < 3; i++) {
         const ball = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 10),
-          stdMat(THREE, 0xe4572e, { roughness: 0.5 }));
+          stdMat(THREE, 0xff9f1c, { roughness: 0.5 }));
         ball.position.set(-0.9 + i * 0.35, tableY + 0.17, 0.45);
         ball.castShadow = true;
         g.add(ball);
@@ -410,7 +485,7 @@ function buildGameProps(THREE, shell, def) {
         disc.rotation.x = Math.PI / 2;
         tgt.add(disc);
         const inner = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.07, 16),
-          stdMat(THREE, 0xd64550));
+          stdMat(THREE, 0xff5c8a));
         inner.rotation.x = Math.PI / 2;
         tgt.add(inner);
         const dot = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.08, 12),
@@ -431,7 +506,7 @@ function buildGameProps(THREE, shell, def) {
       const rows = [[-0.35, 0, 0.35], [-0.18, 0.18], [0]];
       rows.forEach((row, ri) => {
         row.forEach((cx) => {
-          const can = cyl(THREE, g, 0.16, 0.16, 0.4, ri === 0 ? 0xc0c0c0 : 0xd64550,
+          const can = cyl(THREE, g, 0.16, 0.16, 0.4, ri === 0 ? 0xfff6e5 : 0xff5c8a,
             cx, tableY + 0.2 + ri * 0.41, -0.1, { metalness: 0.5, roughness: 0.35 }, 14);
           can.userData.home = can.position.clone();
           can.userData.down = false;
@@ -443,7 +518,7 @@ function buildGameProps(THREE, shell, def) {
       refs.balls = [];
       for (let i = 0; i < 3; i++) {
         const ball = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10),
-          stdMat(THREE, 0x2e7d32, { roughness: 0.5 }));
+          stdMat(THREE, 0x2fbf4a, { roughness: 0.5 }));
         ball.position.set(0.95 + i * 0.32, tableY + 0.15, 0.45);
         ball.castShadow = true;
         g.add(ball);
@@ -467,7 +542,7 @@ function buildGameProps(THREE, shell, def) {
         // Angka hadiah di tengah tiap irisan.
         const numTex = canvasTex(THREE, 128, 64, (cg) => {
           cg.fillStyle = '#ffffff'; cg.textAlign = 'center'; cg.textBaseline = 'middle';
-          cg.font = '700 44px Georgia, serif';
+          cg.font = '800 44px "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "Trebuchet MS", system-ui, sans-serif';
           cg.fillText(String(seg[k]), 64, 34);
         });
         const num = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.21),
@@ -642,8 +717,8 @@ export function buildNightMarketGames(scene, THREE, ctx) {
         const p0 = localPoint(stall, 0, 1.7, 1.9);
         if (res.hit) {
           const p1 = localPoint(stall, peg.position.x, 1.85, -0.1);
-          flyProjectile(ringMesh(0xc0392b), p0, p1, 1.1, 0.55, () => {
-            const landed = ringMesh(0xc0392b);
+          flyProjectile(ringMesh(0xff5c8a), p0, p1, 1.1, 0.55, () => {
+            const landed = ringMesh(0xff5c8a);
             landed.position.set(peg.position.x, 1.62, -0.1);
             landed.rotation.x = Math.PI / 2;
             stall.shell.group.add(landed);
@@ -651,7 +726,7 @@ export function buildNightMarketGames(scene, THREE, ctx) {
           });
         } else {
           const p1 = localPoint(stall, aimX, 0.35, 1.4);
-          flyProjectile(ringMesh(0xc0392b), p0, p1, 1.1, 0.55, null);
+          flyProjectile(ringMesh(0xff5c8a), p0, p1, 1.1, 0.55, null);
         }
         break;
       }
@@ -674,7 +749,7 @@ export function buildNightMarketGames(scene, THREE, ctx) {
       }
       case 'basket': {
         const p0 = localPoint(stall, 0, 1.7, 1.9);
-        const ball = ballMesh(0xe4572e);
+        const ball = ballMesh(0xff9f1c);
         if (res.hit) {
           const p1 = localPoint(stall, 0, 2.45, -0.2);
           flyProjectile(ball, p0, p1, 1.6, 0.6, () => {
@@ -701,7 +776,7 @@ export function buildNightMarketGames(scene, THREE, ctx) {
       }
       case 'cans': {
         const p0 = localPoint(stall, 0, 1.7, 1.9);
-        const ball = ballMesh(0x2e7d32, 0.15);
+        const ball = ballMesh(0x2fbf4a, 0.15);
         const p1 = localPoint(stall, 0, 1.5, -0.1);
         flyProjectile(ball, p0, p1, 0.9, 0.45, () => {
           for (const i of res.newly || []) {
@@ -983,6 +1058,7 @@ export function buildNightMarketGames(scene, THREE, ctx) {
       else if (o.prize === NM_RIVAL[o.id]) panel.result.textContent += ' ' + rivalBeatLine(true);
       sfx('coin');
       if (o.prize >= 25) sfx('harvest');
+      lhSfx(o.prize >= 25 ? 'DUAR!' : 'YEAY!'); // momen perayaan: menang ronde
       toast(T('gameWin', { n: o.prize }));
     } else {
       panel.result.textContent = T('gameLose');

@@ -306,6 +306,20 @@ export const STRINGS = {
   inviteReady: { id: 'Ajak {u} main {a}', en: 'Invite {u} to play {a}' },
 };
 
+// SFX onomatopoeia khas lembah (Lane C, anime overhaul) — kosakata visual
+// feedback, BUKAN teks terjemahan: sama di ID dan EN (seperti SFX manga),
+// jadi tidak masuk STRINGS dan tidak berubah saat ganti bahasa.
+export const LH_SFX = {
+  harvest: 'PANEN!',
+  buy: 'TING!',
+  sell: 'TING!',
+  plant: 'HAP!',
+  start: 'YEAY!',
+  win: 'YEAY!',
+  morning: 'YEAY!',
+  duar: 'DUAR!', // momen benturan besar (wahana/games — dipakai Lane D)
+};
+
 export function t(key, lang = 'id', vars = {}) {
   const entry = STRINGS[key];
   let s = entry ? (entry[lang] || entry.id || key) : key;

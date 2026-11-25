@@ -1,4 +1,8 @@
 // nm-zone.js: Zona Pasar Malam (Lane P).
+// Restyle visual Lane D (anime overhaul, 25 Nov 2026): semua permukaan
+// MeshToonMaterial + gradientMap 4-step (cel), palet langit/sakura/
+// matahari PRODUCT.md, papan nama display rounded, lampion + lampu
+// hangat warna anime. Koordinat, collider, perilaku, teks TIDAK berubah.
 // Struktur zona saja: tanah padat + jalan, gapura + papan nama bilingual,
 // tiang lampu + string lights, obor, pagar tali, panggung sulap, kubah
 // malam lokal + bintang + lampu hangat. Stan jajanan / wahana / game
@@ -34,9 +38,25 @@ export const NM_GAMES_S = [66, 74, 82, 90].map((x) => ({ x, z: 12, kind: 'game' 
 
 const WOOD = 0x8a6b3f, WOOD_DARK = 0x6e4a26, BARK = 0x4a3419;
 const DIRT = 0x9a7b4f, DIRT_LIGHT = 0xb59a6e, STONE = 0x8d8578;
+// Palet anime PRODUCT.md (dipakai zona): sakura / matahari / daun.
+const SAKURA = 0xff8fb3, SAKURA_DEEP = 0xff5c8a, SUN = 0xffc93c, LEAF = 0x2fbf4a;
+const INK = 0x1d2b53;
 
+// ---- Cel/toon anime: MeshToonMaterial + gradientMap 4-step (pita warna
+// tegas, bukan gradien halus Lambert). MeshBasicMaterial dipertahankan
+// hanya untuk sumber cahaya (neon, bola lampu, api, bulan, bintang).
+let _toonGrad = null;
+function toonGrad() {
+  if (_toonGrad) return _toonGrad;
+  const tex = new THREEImpl.DataTexture(new Uint8Array([90, 150, 210, 255]), 4, 1, THREEImpl.RedFormat);
+  tex.minFilter = THREEImpl.NearestFilter;
+  tex.magFilter = THREEImpl.NearestFilter;
+  tex.needsUpdate = true;
+  _toonGrad = tex;
+  return tex;
+}
 function lam(color, opts = {}) {
-  return new THREEImpl.MeshLambertMaterial({ color, ...opts });
+  return new THREEImpl.MeshToonMaterial({ color, gradientMap: toonGrad(), ...opts });
 }
 function basic(color, opts = {}) {
   return new THREEImpl.MeshBasicMaterial({ color, ...opts });
@@ -51,11 +71,11 @@ function dirtTexture() {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 256;
   const g = c.getContext('2d');
-  g.fillStyle = '#9a7b4f'; g.fillRect(0, 0, 256, 256);
+  g.fillStyle = '#a5824f'; g.fillRect(0, 0, 256, 256);
   const rnd = seeded(20261123);
   for (let i = 0; i < 900; i++) {
     const v = rnd();
-    g.fillStyle = v > 0.66 ? 'rgba(181,154,110,0.5)' : v > 0.33 ? 'rgba(122,94,58,0.45)' : 'rgba(74,52,25,0.35)';
+    g.fillStyle = v > 0.66 ? 'rgba(198,168,116,0.5)' : v > 0.33 ? 'rgba(140,106,62,0.45)' : 'rgba(74,52,25,0.35)';
     g.fillRect(rnd() * 256, rnd() * 256, 1 + rnd() * 3, 1 + rnd() * 3);
   }
   for (let i = 0; i < 24; i++) { // kerikil kecil
@@ -74,12 +94,13 @@ function signTexture(lang) {
   const c = document.createElement('canvas');
   c.width = 512; c.height = 160;
   const g = c.getContext('2d');
-  g.fillStyle = '#8a6b3f'; g.fillRect(0, 0, 512, 160);
-  g.strokeStyle = '#fff8dc'; g.lineWidth = 6; g.strokeRect(8, 8, 496, 144);
-  g.fillStyle = '#fff8dc'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.font = 'bold 62px Georgia, serif';
+  g.fillStyle = '#fff6e5'; g.fillRect(0, 0, 512, 160); // --lh-paper
+  g.strokeStyle = '#1d2b53'; g.lineWidth = 6; g.strokeRect(8, 8, 496, 144); // outline tinta
+  g.fillStyle = '#1d2b53'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = '800 62px "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "Trebuchet MS", system-ui, sans-serif';
   g.fillText(big, 256, 66);
-  g.font = 'bold 30px Georgia, serif';
+  g.fillStyle = '#ff5c8a'; // --lh-sakura-deep
+  g.font = '800 30px "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "Trebuchet MS", system-ui, sans-serif';
   g.fillText(small.split('').join(' '), 256, 124);
   return new THREEImpl.CanvasTexture(c);
 }
@@ -98,7 +119,7 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
   // pita transisi terrain) + tepi batu + jalan utama/silang.
   const ground = new T.Mesh(
     new T.PlaneGeometry(36, 86),
-    new T.MeshLambertMaterial({ map: dirtTexture() }),
+    new T.MeshToonMaterial({ map: dirtTexture(), gradientMap: toonGrad() }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(80, Y + 0.07, -3);
@@ -121,7 +142,7 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
   // tanpa overlap, tanpa z-fight).
   const groundAnnex = new T.Mesh(
     new T.PlaneGeometry(28, 9),
-    new T.MeshLambertMaterial({ map: dirtTexture() }),
+    new T.MeshToonMaterial({ map: dirtTexture(), gradientMap: toonGrad() }),
   );
   groundAnnex.rotation.x = -Math.PI / 2;
   groundAnnex.position.set(88, Y + 0.07, -50.5);
@@ -158,8 +179,8 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
   beam.position.set(0, Y + 4.7, 0);
   beam.castShadow = true;
   gate.add(beam);
-  // Neon hangat di balok (merah / kuning / hijau, tanpa ungu-biru).
-  const neonCols = [0xff3b30, 0xffc93c, 0x39d353];
+  // Neon hangat di balok (sakura / matahari / daun, tanpa ungu-biru).
+  const neonCols = [SAKURA_DEEP, SUN, LEAF];
   neonCols.forEach((cc, i) => {
     const strip = new T.Mesh(new T.BoxGeometry(0.6, 0.1, 1.9), basic(cc));
     strip.position.set(0, Y + 5.0, -2.1 + i * 2.1);
@@ -190,7 +211,7 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
     const cord = new T.Mesh(new T.CylinderGeometry(0.02, 0.02, 0.5, 4), lam(BARK));
     cord.position.set(0, Y + 4.2, pz);
     gate.add(cord);
-    const lamp = new T.Mesh(new T.SphereGeometry(0.34, 10, 8), basic(0xff5c4a));
+    const lamp = new T.Mesh(new T.SphereGeometry(0.34, 10, 8), basic(SAKURA_DEEP));
     lamp.scale.y = 1.15;
     lamp.position.set(0, Y + 3.8, pz);
     gate.add(lamp);
@@ -249,7 +270,7 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
   cableGeo.setAttribute('position', new T.Float32BufferAttribute(cablePts, 3));
   group.add(new T.LineSegments(cableGeo, new T.LineBasicMaterial({ color: 0x2b2118 })));
   for (const p of polePos) bulbSpots.push({ x: p.x, y: Y + 3.7, z: p.z }); // ujung tiang
-  const bulbCols = [0xffb340, 0xff8a5c, 0xffe9a8, 0xff6b5c].map((c) => new T.Color(c));
+  const bulbCols = [SUN, SAKURA, 0xfff6e5, SAKURA_DEEP].map((c) => new T.Color(c));
   const bulbs = new T.InstancedMesh(
     new T.SphereGeometry(0.1, 6, 5), basic(0xffffff), bulbSpots.length);
   bulbSpots.forEach((p, i) => {
@@ -364,7 +385,7 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
   // ---- Kubah malam lokal: setengah bola gelap (BackSide) + bintang +
   // bulan. Hanya terlihat saat pemain di dalam/dekat zona (update()).
   const domeMat = new T.MeshBasicMaterial({
-    color: 0x0e1a33, transparent: true, opacity: 0,
+    color: 0x141b3d, transparent: true, opacity: 0, // --lh-night
     side: T.BackSide, fog: false, depthWrite: false,
   });
   const dome = new T.Mesh(
@@ -402,6 +423,15 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
   moon.renderOrder = 11;
   moon.visible = false;
   group.add(moon);
+  // Cincin outline tinta di sekeliling bulan (cel — bulan ikut bergaris
+  // tegas seperti matahari bergaris di langit siang).
+  const moonRingMat = basic(INK, { transparent: true, opacity: 0, fog: false, depthWrite: false });
+  const moonRing = new T.Mesh(new T.RingGeometry(3.0, 3.4, 24), moonRingMat);
+  moonRing.position.copy(moon.position);
+  moonRing.lookAt(80, Y + 2, -3);
+  moonRing.renderOrder = 11;
+  moonRing.visible = false;
+  group.add(moonRing);
 
   // ---- Lampu hangat di dalam zona (4–6 PointLight; sisanya emissive).
   const lightSpots = [
@@ -450,6 +480,7 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
     dome.visible = on;
     stars.visible = on;
     moon.visible = on;
+    moonRing.visible = on;
     // Lampu: sembunyikan total saat jauh (intensitasnya memang 0 di sana).
     // Lampu yang tidak terlihat dikeluarkan three.js dari program shader,
     // menghemat biaya fragment di semua piksel — diukur headless di spawn:
@@ -459,6 +490,7 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
       domeMat.opacity = 0.85 * k;
       starMat.opacity = 0.95 * k;
       moonMat.opacity = 0.95 * k;
+      moonRingMat.opacity = 0.95 * k;
       for (const li of lights) li.intensity = 26 * k;
     } else {
       for (const li of lights) li.intensity = 0;
@@ -467,7 +499,7 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
 
   return {
     group, colliders, minimap, update, interactables: [],
-    dome, stars, moon, lights,
+    dome, stars, moon, moonRing, lights,
     get nightFactor() { return nightFactor; },
   };
 }

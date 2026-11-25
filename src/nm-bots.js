@@ -1,5 +1,11 @@
 // nm-bots.js — Lane B (bot): driver arena bom-bom car + penumpang bot wahana.
 //
+// Restyle visual Lane D (anime overhaul, 25 Nov 2026): kustomisasi bot
+// digeser ke warna palet anime (id warna yang sudah ada di
+// customization.js — palet nilainya milik Lane B), squash-and-stretch saat
+// bot tiba di board point / naik wahana. Wajah anime bot ikut
+// buildCharacter (Lane B, player.js). Perilaku, rute, timing TIDAK berubah.
+//
 // Modul ini TIDAK menyentuh main.js / nm-rides.js / nm-games.js. Koordinator
 // yang mewiring-nya (lihat REPORT.md lane ini untuk snippet wiring persis):
 //   import { createBots, attachArenaBots } from './nm-bots.js';
@@ -266,7 +272,7 @@ const BOT_DEFS = [
     key: 'rani', gender: 'female',
     custom: {
       skin: 'fair', hairStyle: 'bun', hairColor: 'brown',
-      shirtModel: 'vest', shirtColor: 'purple',
+      shirtModel: 'vest', shirtColor: 'pink', // dulu 'purple' — pink sakura
       pantsModel: 'shorts', pantsColor: 'yellow',
       hatModel: 'beanie', hatColor: 'teal',
       glassesModel: 'round', glassesColor: 'teal',
@@ -373,6 +379,7 @@ export function createBots(game) {
         timer: WAIT_MIN + Math.random() * (WAIT_MAX - WAIT_MIN),
         phase: Math.random() * Math.PI * 2, // fase ayun kaki/napas
         standX: bx, standZ: bz,
+        squash: 0, // timer squash-and-stretch (detik, 0 = tidak aktif)
       });
     }
     state.ridesReady = typeof nmRides?.getRideEntry === 'function'
@@ -418,6 +425,15 @@ export function createBots(game) {
   function stepBot(bot, dt) {
     const g = bot.group;
     const u = g.userData || {};
+    // Squash-and-stretch anime (Lane D): gepeng sesaat saat tiba di board
+    // point / naik wahana, lalu kembali — murni visual, gerak tidak berubah.
+    if (bot.squash > 0) {
+      bot.squash = Math.max(0, bot.squash - dt);
+      const k = 1 - bot.squash / 0.28;
+      const s = Math.sin(Math.min(1, k) * Math.PI);
+      g.scale.set(1 + 0.07 * s, 1 - 0.12 * s, 1 + 0.07 * s);
+      if (bot.squash === 0) g.scale.set(1, 1, 1);
+    }
     if (bot.mode === 'walk') {
       const dx = bot.tx - g.position.x;
       const dz = bot.tz - g.position.z;
@@ -427,6 +443,7 @@ export function createBots(game) {
         bot.timer = WAIT_MIN + Math.random() * (WAIT_MAX - WAIT_MIN);
         bot.standX = g.position.x;
         bot.standZ = g.position.z;
+        bot.squash = 0.28; // mendarat: gepeng sesaat
         if (u.legL) u.legL.rotation.x = 0;
         if (u.legR) u.legR.rotation.x = 0;
         return;
@@ -459,6 +476,7 @@ export function createBots(game) {
         if (canRide(bot.rideId) && playerRideId() !== bot.rideId && !otherRidingSame(bot)) {
           bot.mode = 'ride';
           bot.timer = RIDE_MIN + Math.random() * (RIDE_MAX - RIDE_MIN);
+          bot.squash = 0.28; // naik: lompat kecil (gepeng sesaat)
           if (u.upper) u.upper.position.y = 0;
           // Langsung tempel ke kursi (bukan frame berikutnya) supaya tidak
           // ada satu frame posisi basi di board point.

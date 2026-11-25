@@ -91,7 +91,9 @@ export function defaultCustom(gender = 'male') {
   const female = gender === 'female';
   return {
     skin: 'medium',
-    hairStyle: female ? 'long' : 'short',
+    // Anime overhaul 25 Nov 2026: Bima default spiky, Sari default long
+    // (= twin-tail untuk cewe, lihat addHair di player.js).
+    hairStyle: female ? 'long' : 'spiky',
     hairColor: female ? 'black' : 'black',
     shirtModel: 'tee',
     shirtColor: female ? 'pink' : 'green',

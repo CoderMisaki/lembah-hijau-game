@@ -3,7 +3,7 @@
 // Labu (4 hari, 14, 32). Tahap visual 0-3 berbeda tiap tahap.
 import * as THREE from 'three';
 import { terrainHeight } from './physics.js';
-import { FARM_ORIGIN, FARM_COLS, FARM_ROWS, FARM_SPACING } from './world.js';
+import { FARM_ORIGIN, FARM_COLS, FARM_ROWS, FARM_SPACING, toonMat, addOutline } from './world.js';
 
 export const CROPS = {
   carrot:  { id: 'carrot',  name: 'Wortel', icon: 'carrot', days: 2, seed: 4,  sell: 12, color: 0xe87a2a, seedKey: 'carrotSeed' },
@@ -17,7 +17,7 @@ export function plotPos(ix, iz) {
 export function plotIndex(ix, iz) { return iz * FARM_COLS + ix; }
 export function isValidPlot(ix, iz) { return ix >= 0 && ix < FARM_COLS && iz >= 0 && iz < FARM_ROWS; }
 
-function mat(color) { return new THREE.MeshLambertMaterial({ color }); }
+function mat(color, opts = {}) { return toonMat(color, opts); }
 
 export class Farm {
   constructor(scene, plotsState) {
@@ -58,9 +58,9 @@ export class Farm {
     const cross = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.6, 5), mat(0x6e4a26));
     cross.rotation.z = Math.PI / 2; cross.position.y = 1.7; sc.add(cross);
     const shirt = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.0, 6), mat(0xd9382b));
-    shirt.position.y = 1.5; sc.add(shirt);
+    shirt.position.y = 1.5; addOutline(shirt); sc.add(shirt);
     const shead = new THREE.Mesh(new THREE.SphereGeometry(0.28, 8, 8), mat(0xe8c9a8));
-    shead.position.y = 2.25; sc.add(shead);
+    shead.position.y = 2.25; addOutline(shead); sc.add(shead);
     const hat = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.35, 8), mat(0xf2d06b));
     hat.position.y = 2.55; sc.add(hat);
     sc.position.set(scX, scY, scZ);
@@ -116,7 +116,7 @@ export class Farm {
     if (stage >= 3) {
       // Siap panen: kilau — cincin kuning kecil di sekeliling tanaman.
       const ring = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.05, 6, 20),
-        new THREE.MeshLambertMaterial({ color: 0xffd54f, emissive: 0x664411 }));
+        mat(0xffd54f, { emissive: 0x664411 }));
       ring.rotation.x = Math.PI / 2; ring.position.y = 0.05; cg.add(ring);
     }
   }

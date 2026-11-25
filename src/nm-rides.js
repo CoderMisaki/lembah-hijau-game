@@ -1,4 +1,9 @@
 // nm-rides.js — Wahana + hiburan pasar malam (Lane R, 2026-11-23).
+// Restyle visual Lane D (anime overhaul, 25 Nov 2026): semua permukaan
+// MeshToonMaterial + gradientMap 4-step (cel), outline tinta inverted-hull
+// di wahana hero, palet langit/sakura/matahari PRODUCT.md, papan neon
+// display rounded, SFX khas lembah ("DUAR!"/"PANEN!"/"TING!") + burst
+// kelopak di momen perayaan. Perilaku, biaya, teks, koordinat TIDAK berubah.
 //
 // Semua wahana + hiburan pasar malam di rect x 58..102, z -50..44, prosedural
 // dari kode (primitif Three.js + material flat, lampu emissive warna-warni).
@@ -70,15 +75,99 @@ const lerp = (a, b, k) => a + (b - a) * k;
 const TAU = Math.PI * 2;
 
 // ---------- Helper geometri (THREE diisi saat build) ----------
+// Cel/toon anime (Lane D restyle, PRODUCT.md § Dunia 3D): semua permukaan
+// MeshToonMaterial + gradientMap 4-step. MeshBasicMaterial dipertahankan
+// hanya untuk sumber cahaya (bola lampu, neon, percikan).
 let T = null;
+const INK = 0x1d2b53; // --lh-ink
+let _toonGrad = null;
+function toonGrad() {
+  if (_toonGrad) return _toonGrad;
+  const tex = new T.DataTexture(new Uint8Array([90, 150, 210, 255]), 4, 1, T.RedFormat);
+  tex.minFilter = T.NearestFilter;
+  tex.magFilter = T.NearestFilter;
+  tex.needsUpdate = true;
+  _toonGrad = tex;
+  return tex;
+}
+// toon(): seperti lam() lama, tapi cel. Kunci yang hanya dikenal
+// Standard/Phong (roughness/metalness/shininess/specular) dibuang supaya
+// tidak ada warning "not a property" dari three.
+function toon(color, extra = {}) {
+  const { shininess, specular, metalness, roughness, ...rest } = extra;
+  return new T.MeshToonMaterial({ color, gradientMap: toonGrad(), ...rest });
+}
 function lam(color, extra = {}) {
-  return new T.MeshLambertMaterial({ color, ...extra });
+  return toon(color, extra);
 }
 function emi(color, intensity = 1) {
-  return new T.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: intensity });
+  return new T.MeshToonMaterial({ color, emissive: color, emissiveIntensity: intensity, gradientMap: toonGrad() });
 }
 function phong(color, extra = {}) {
-  return new T.MeshPhongMaterial({ color, shininess: 90, ...extra });
+  return toon(color, extra);
+}
+// Outline tinta inverted-hull (PRODUCT.md): salinan geometri yang sama,
+// BackSide warna tinta, skala sedikit lebih besar — ditempel sebagai anak
+// mesh hero supaya ikut semua transform. Hanya untuk objek hero (bukan
+// instanced / objek kecil).
+function outline(mesh, s = 1.05) {
+  const o = new T.Mesh(mesh.geometry, new T.MeshBasicMaterial({ color: INK, side: T.BackSide }));
+  o.scale.setScalar(s);
+  o.raycast = () => {};
+  mesh.add(o);
+  return o;
+}
+
+// ---- SFX onomatopoeia + burst kelopak (Lane D; PRODUCT.md § Motion) ----
+// Teks SFX khas lembah ("DUAR!"/"PANEN!"/"TING!"), partikel = kelopak
+// sakura + daun + bintang — BUKAN asap/shard Sakuga. Satu momen perayaan
+// per fitur (bukan tiap klik). Mati bila prefers-reduced-motion.
+const LH_REDUCED = typeof matchMedia === 'function'
+  && matchMedia('(prefers-reduced-motion: reduce)').matches;
+function lhFxCss() {
+  if (typeof document === 'undefined' || document.getElementById('lh-fx-style-rides')) return;
+  const st = document.createElement('style');
+  st.id = 'lh-fx-style-rides';
+  st.textContent = '.lh-sfx-nm{position:fixed;left:50%;top:38%;z-index:60;pointer-events:none;font-family:"Arial Rounded MT Bold","Hiragino Maru Gothic ProN","Hiragino Sans","Trebuchet MS",system-ui,sans-serif;font-weight:800;font-style:italic;font-size:clamp(34px,6vw,52px);letter-spacing:.02em;color:#ffc93c;-webkit-text-stroke:2px #1d2b53;text-shadow:4px 4px 0 rgba(29,43,83,.9);transform:translate(-50%,-50%) rotate(-6deg);animation:lh-sfx-nm-pop .9s cubic-bezier(.34,1.56,.64,1) forwards}'
+    + '@keyframes lh-sfx-nm-pop{0%{transform:translate(-50%,-50%) scale(.35) rotate(-12deg);opacity:0}25%{opacity:1;transform:translate(-50%,-50%) scale(1.18) rotate(-3deg)}55%{transform:translate(-50%,-50%) scale(1) rotate(-6deg);opacity:1}100%{transform:translate(-50%,-62%) scale(1.04) rotate(-6deg);opacity:0}}'
+    + '.lh-petal{position:fixed;z-index:60;pointer-events:none;animation:lh-petal-fly .9s ease-out forwards}'
+    + '@keyframes lh-petal-fly{to{transform:translate(var(--dx,0px),var(--dy,-60px)) rotate(var(--rot,180deg)) scale(.55);opacity:0}}'
+    + '@media (prefers-reduced-motion:reduce){.lh-sfx-nm,.lh-petal{animation:none!important;display:none!important}}';
+  document.head.appendChild(st);
+}
+function lhBurst(host) {
+  const cols = ['#ff8fb3', '#ffc93c', '#2fbf4a', '#ff5c8a'];
+  const shapes = ['50% 0 50% 50%', '50%', '0 50% 50% 50%']; // kelopak / bulat / daun
+  for (let i = 0; i < 10; i++) {
+    const p = document.createElement('span');
+    p.className = 'lh-petal';
+    p.setAttribute('aria-hidden', 'true');
+    const a = Math.random() * Math.PI * 2, d = 60 + Math.random() * 90;
+    p.style.setProperty('--dx', `${Math.cos(a) * d}px`);
+    p.style.setProperty('--dy', `${Math.sin(a) * d - 40}px`);
+    p.style.setProperty('--rot', `${(Math.random() * 360) | 0}deg`);
+    p.style.left = '50%';
+    p.style.top = '38%';
+    p.style.background = cols[i % cols.length];
+    p.style.borderRadius = shapes[i % shapes.length];
+    const s = 9 + Math.random() * 7;
+    p.style.width = `${s}px`;
+    p.style.height = `${s * 0.8}px`;
+    host.appendChild(p);
+    setTimeout(() => p.remove(), 950);
+  }
+}
+function lhSfx(text) {
+  if (LH_REDUCED || typeof document === 'undefined') return;
+  lhFxCss();
+  const host = document.getElementById('game-container') || document.body;
+  const el = document.createElement('div');
+  el.className = 'lh-sfx-nm';
+  el.textContent = text;
+  el.setAttribute('aria-hidden', 'true');
+  host.appendChild(el);
+  lhBurst(host);
+  setTimeout(() => el.remove(), 950);
 }
 function mesh(geo, material, x = 0, y = 0, z = 0, cast = false) {
   const m = new T.Mesh(geo, material);
@@ -112,12 +201,13 @@ function beam(x1, y1, z1, x2, y2, z2, thick, material) {
 }
 const ground = (x, z) => terrainHeight(x, z);
 
-// Palet pasar malam: kayu + warna karnaval di atas rumput lembah.
+// Palet pasar malam — token anime PRODUCT.md (langit/sakura/matahari/
+// daun di atas rumput lembah). Kayu dipakai hemat; tanpa ungu-biru.
 const C = {
   wood: 0x8a6b3f, woodDark: 0x6b4e2a, woodLight: 0xb08d57,
-  red: 0xd23c2e, pink: 0xf27ba7, yellow: 0xffc93c, gold: 0xffb340,
-  teal: 0x1f8a8c, blue: 0x2b6cb0, purple: 0x6b4fa1, cream: 0xfff3d6,
-  white: 0xf5f2ea, black: 0x241d1a, green: 0x3f8f3a, orange: 0xf07b2d,
+  red: 0xff5c8a, pink: 0xff8fb3, yellow: 0xffc93c, gold: 0xff9f1c,
+  teal: 0x3fa9f5, blue: 0x1e6fd9, purple: 0xff8fb3, cream: 0xfff3d6,
+  white: 0xf5f2ea, black: 0x241d1a, green: 0x2fbf4a, orange: 0xff9f1c,
   haunted: 0x3a2b4d, hauntedRoof: 0x241a30, mirror: 0xdfe9f2, sky: 0x9fc8e8,
 };
 
@@ -216,8 +306,10 @@ function makeFerris() {
   // Roda: pelek + jari-jari (berputar mengelilingi sumbu X).
   const wheel = new T.Group();
   wheel.position.set(0, AXLE, 0);
-  wheel.add(mesh(new T.TorusGeometry(R, 0.14, 6, 28), red, 0, 0, 0));
-  wheel.children[0].rotation.y = Math.PI / 2;
+  const rim = mesh(new T.TorusGeometry(R, 0.14, 6, 28), red, 0, 0, 0);
+  rim.rotation.y = Math.PI / 2;
+  outline(rim, 1.04);
+  wheel.add(rim);
   for (let i = 0; i < 4; i++) {
     const spoke = box(0.12, R * 2, 0.12, cream, 0, 0, 0);
     spoke.rotation.x = (i * Math.PI) / 4;
@@ -240,6 +332,7 @@ function makeFerris() {
   for (let i = 0; i < 8; i++) {
     const cab = new T.Group();
     const body = box(1.0, 0.7, 0.9, i % 2 ? lam(C.teal) : lam(C.red), 0, 0, 0, true);
+    outline(body, 1.08);
     const rim = box(1.1, 0.1, 1.0, lam(C.cream), 0, 0.38, 0);
     const bench = box(0.9, 0.12, 0.5, lam(C.woodLight), 0, -0.1, -0.15);
     cab.add(body, rim, bench);
@@ -305,7 +398,9 @@ function makePirate() {
   swing.add(box(0.24, ARM, 0.24, wood, 0, -ARM / 2, 0));
   const hull = new T.Group();
   hull.position.set(0, -ARM, 0);
-  hull.add(box(3.6, 0.7, 1.3, lam(C.red), 0, 0, 0, true));
+  const hullBody = box(3.6, 0.7, 1.3, lam(C.red), 0, 0, 0, true);
+  outline(hullBody, 1.05);
+  hull.add(hullBody);
   hull.add(box(3.9, 0.25, 1.45, lam(C.woodLight), 0, 0.45, 0));
   const bow = cone(0.65, 1.1, lam(C.gold), -2.1, 0.3, 0);
   bow.rotation.z = Math.PI / 2;
@@ -348,7 +443,9 @@ function makeCarousel() {
   spin.position.set(0, 0, 0);
   spin.add(cyl(3.4, 3.4, 0.25, lam(C.cream), 0, 0.55, 0, 20));
   spin.add(cyl(0.18, 0.18, 4.0, lam(C.gold), 0, 2.4, 0, 8));
-  spin.add(cone(4.3, 1.3, lam(C.pink), 0, 4.9, 0, 16));
+  const roofCone = cone(4.3, 1.3, lam(C.pink), 0, 4.9, 0, 16);
+  outline(roofCone, 1.04);
+  spin.add(roofCone);
   spin.add(sph(0.3, emi(C.gold, 1.5), 0, 5.7, 0));
   const horseCols = [C.white, 0xd8b36a, C.pink, C.teal, 0x8a6b3f, C.red];
   const horses = [];
@@ -463,7 +560,9 @@ function makeTagada() {
   g.add(cyl(4.5, 4.7, 0.5, lam(C.woodDark), 0, 0.25, 0, 20, true));
   const disc = new T.Group();
   disc.position.set(0, 0.75, 0);
-  disc.add(cyl(4.0, 4.0, 0.35, lam(C.purple), 0, 0, 0, 20));
+  const discTop = cyl(4.0, 4.0, 0.35, lam(C.purple), 0, 0, 0, 20);
+  outline(discTop, 1.03);
+  disc.add(discTop);
   disc.add(mesh(new T.TorusGeometry(4.0, 0.12, 6, 28), emi(C.yellow, 1.2), 0, 0.18, 0));
   disc.children[1].rotation.x = Math.PI / 2;
   disc.add(cone(0.8, 0.9, lam(C.gold), 0, 0.6, 0, 10));
@@ -579,17 +678,17 @@ function makeBumper() {
   function drawSign(score) {
     const c = signCtx;
     c.clearRect(0, 0, 512, 160);
-    c.fillStyle = '#17102e'; c.fillRect(0, 0, 512, 160);
-    c.strokeStyle = '#ffb340'; c.lineWidth = 8; c.strokeRect(6, 6, 500, 148);
-    c.strokeStyle = '#f27ba7'; c.lineWidth = 3; c.strokeRect(16, 16, 480, 128);
+    c.fillStyle = '#1d2b53'; c.fillRect(0, 0, 512, 160); // --lh-ink
+    c.strokeStyle = '#ff9f1c'; c.lineWidth = 8; c.strokeRect(6, 6, 500, 148);
+    c.strokeStyle = '#ff8fb3'; c.lineWidth = 3; c.strokeRect(16, 16, 480, 128);
     c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.font = '700 58px Georgia, serif';
-    c.shadowColor = '#ff5c4a'; c.shadowBlur = 18;
+    c.font = '800 58px "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "Trebuchet MS", system-ui, sans-serif';
+    c.shadowColor = '#ff5c8a'; c.shadowBlur = 18;
     c.fillStyle = '#fff3d6';
     c.fillText('BOMBOM CAR', 256, 58);
     c.shadowBlur = 0;
-    c.font = '700 40px Georgia, serif';
-    c.shadowColor = '#39d353'; c.shadowBlur = 12;
+    c.font = '800 40px "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "Trebuchet MS", system-ui, sans-serif';
+    c.shadowColor = '#2fbf4a'; c.shadowBlur = 12;
     c.fillStyle = '#8dff9e';
     c.fillText('SKOR  ' + score, 256, 122);
     c.shadowBlur = 0;
@@ -680,7 +779,9 @@ function makeBumper() {
   const starts = [[0, 2], [-4, -1.5], [4, -1.5], [0, -2.5]];
   for (let i = 0; i < 4; i++) {
     const cg = new T.Group();
-    cg.add(box(1.15, 0.45, 1.6, lam(carCols[i]), 0, 0.45, 0, true));
+    const carBody = box(1.15, 0.45, 1.6, lam(carCols[i]), 0, 0.45, 0, true);
+    outline(carBody, 1.08);
+    cg.add(carBody);
     cg.add(box(0.95, 0.5, 0.8, lam(C.cream), 0, 0.85, -0.15));
     cg.add(cyl(0.04, 0.04, 1.9, lam(C.black), 0, 1.4, -0.6, 4));
     cg.add(sph(0.09, emi(C.yellow, 1.5), 0, 2.4, -0.6, 6, 6));
@@ -886,6 +987,7 @@ function makeBumper() {
             if (st.driving && (i === 0 || j === 0)) {
               scores.player += 1;
               drawSign(scores.player);
+              lhSfx('DUAR!'); // momen perayaan: skor pemain bertambah
               // 'eat' = 2 nada triangle rendah — sfx tabrakan ('bump') belum
               // ada di audio.js; ini yang paling dekat dengan bunyi benturan
               // (lihat REPORT lane A — usulan follow-up di luar file ini).
@@ -998,7 +1100,9 @@ function makeCoaster() {
   const cars = [];
   for (let i = 0; i < 3; i++) {
     const cg = new T.Group();
-    cg.add(box(1.1, 0.6, 1.9, lam(i === 0 ? C.red : C.yellow), 0, 0.45, 0, true));
+    const carBody = box(1.1, 0.6, 1.9, lam(i === 0 ? C.red : C.yellow), 0, 0.45, 0, true);
+    outline(carBody, 1.07);
+    cg.add(carBody);
     cg.add(box(0.9, 0.5, 1.2, lam(C.cream), 0, 0.95, -0.1));
     g.add(cg);
     cars.push(cg);
@@ -1077,7 +1181,9 @@ function makeLoopTrain(kind) {
   const veh = new T.Group();
   if (isTrain) {
     const loco = new T.Group();
-    loco.add(box(1.3, 0.9, 2.2, lam(C.red), 0, 0.75, 0, true));
+    const locoBody = box(1.3, 0.9, 2.2, lam(C.red), 0, 0.75, 0, true);
+    outline(locoBody, 1.06);
+    loco.add(locoBody);
     loco.add(box(0.9, 0.7, 0.9, lam(C.cream), 0, 1.5, -0.3));
     loco.add(cyl(0.14, 0.18, 0.7, lam(C.black), 0, 1.5, 0.85, 6));
     veh.add(loco);
@@ -1090,7 +1196,9 @@ function makeLoopTrain(kind) {
     }
   } else {
     const car = new T.Group();
-    car.add(box(1.3, 0.7, 2.1, lam(C.yellow), 0, 0.7, 0, true));
+    const odongBody = box(1.3, 0.7, 2.1, lam(C.yellow), 0, 0.7, 0, true);
+    outline(odongBody, 1.06);
+    car.add(odongBody);
     car.add(box(1.35, 0.14, 2.2, lam(C.pink), 0, 1.35, 0));
     for (const [sx, sz] of [[-0.5, -0.9], [0.5, -0.9], [-0.5, 0.9], [0.5, 0.9]]) {
       car.add(cyl(0.05, 0.05, 0.6, lam(C.woodDark), sx, 1.05, sz, 4));
@@ -1346,7 +1454,7 @@ function makeMotorwall() {
   const gy = ground(98, -32);
   const g = new T.Group();
   g.position.set(98, gy, -32);
-  const wallMat = new T.MeshLambertMaterial({ color: C.wood, side: T.DoubleSide });
+  const wallMat = toon(C.wood, { side: T.DoubleSide });
   const wall = mesh(new T.CylinderGeometry(3, 3, 4, 18, 1, true), wallMat, 0, 2, 0, true);
   g.add(wall);
   g.add(mesh(new T.TorusGeometry(3, 0.1, 6, 24), lam(C.red), 0, 4, 0));
@@ -1419,8 +1527,8 @@ function makeMagic() {
   rabbit.position.set(1.5, 1.6, -0.5);
   g.add(rabbit);
   // Asap.
-  const smoke = sph(0.5, new T.MeshLambertMaterial({
-    color: 0xffffff, transparent: true, opacity: 0 }), 1.5, 1.9, -0.5, 10, 8);
+  const smoke = sph(0.5, toon(0xfff6e5, {
+    transparent: true, opacity: 0 }), 1.5, 1.9, -0.5, 10, 8);
   g.add(smoke);
   // Kartu melayang.
   const cards = [];
@@ -1447,6 +1555,7 @@ function makeMagic() {
     onUse(game, H) {
       st.trick = 2.2;
       H?.toast?.(H.t('rideMagicTrick'));
+      lhSfx('TING!'); // momen perayaan: trik sulap keluar
       H?.sfx?.play?.('harvest');
     },
     update(dt, game, H) {
@@ -1606,7 +1715,9 @@ function makeBalloon() {
   // Menara sudut + atap kerucut.
   const corners = [[-6, -5, cols[0]], [6, -5, cols[1]], [-6, 5, cols[2]], [6, 5, cols[3]]];
   for (const [cx, cz, col] of corners) {
-    g.add(cyl(1.1, 1.2, 3.6, lam(col), cx, 1.8, cz, 10, true));
+    const tower = cyl(1.1, 1.2, 3.6, lam(col), cx, 1.8, cz, 10, true);
+    outline(tower, 1.04);
+    g.add(tower);
     g.add(cone(1.35, 1.4, lam(C.gold), cx, 4.3, cz, 10));
   }
   g.add(box(11.4, 0.1, 9.4, lam(0xfdf3d8), 0, 0.06, 0));
@@ -1672,7 +1783,7 @@ function makeBallpit() {
   mkWall(0.3, 0.9, 10, 4, 0.45, 0);
   g.add(box(7.6, 0.1, 9.6, lam(0x9fc8e8), 0, 0.06, 0));
   const ballGeo = new T.SphereGeometry(0.28, 8, 6);
-  const ballMat = new T.MeshLambertMaterial({ color: 0xffffff });
+  const ballMat = toon(0xffffff);
   const COUNT = 64;
   const inst = new T.InstancedMesh(ballGeo, ballMat, COUNT);
   const dummy = new T.Object3D();
@@ -1765,8 +1876,8 @@ function makeFishing() {
   const gy = ground(98, 10);
   const g = new T.Group();
   g.position.set(98, gy, 10);
-  const water = box(6, 0.15, 5, new T.MeshLambertMaterial({
-    color: 0x3d8fd1, transparent: true, opacity: 0.6 }), 0, 0.12, 0);
+  const water = box(6, 0.15, 5, toon(0x3fa9f5, {
+    transparent: true, opacity: 0.6 }), 0, 0.12, 0);
   g.add(water);
   const rimM = lam(C.woodDark);
   g.add(box(6.6, 0.25, 0.4, rimM, 0, 0.12, -2.6));
@@ -1781,8 +1892,8 @@ function makeFishing() {
   const fishes = [];
   for (let i = 0; i < 4; i++) {
     const f = new T.Group();
-    f.add(box(0.36, 0.14, 0.14, lam(i % 2 ? 0xf07b2d : 0xffd23c), 0, 0, 0));
-    const tail = cone(0.09, 0.18, lam(0xf07b2d), -0.26, 0, 0, 4);
+    f.add(box(0.36, 0.14, 0.14, lam(i % 2 ? C.orange : 0xffd23c), 0, 0, 0));
+    const tail = cone(0.09, 0.18, lam(C.orange), -0.26, 0, 0, 4);
     tail.rotation.z = Math.PI / 2;
     f.add(tail);
     g.add(f);
@@ -1834,6 +1945,7 @@ function makeFishing() {
         line.visible = false;
         addCoins(game, 2);
         H?.toast?.(H.t('rideFishCaught', { n: 2 }));
+        lhSfx('PANEN!'); // momen perayaan: ikan dapat
         H?.sfx?.play?.('coin');
       }
     },

@@ -1,6 +1,12 @@
 // nm-invite.js — Lane C "Ajak Main": undang pemain di room untuk main
 // aktivitas pasar malam yang sama (wahana / game berhadiah).
 //
+// Restyle visual Lane D (anime overhaul, 25 Nov 2026): SFX khas lembah
+// ("TING!" saat undangan masuk, "YEAY!" saat diterima) + burst kelopak,
+// tombol dialog squash saat ditekan. Dialog + tombolnya sendiri milik
+// index.html / Lane C (styles.css) — file ini tidak mengubah markup atau
+// gaya dasarnya. Protokol, timeout, teks TIDAK berubah.
+//
 // Protokol (broadcast generik Multiplayer.broadcast, TANPA ubah
 // multiplayer.js). Semua event disiarkan ke SEMUA peer di room; penerima
 // hanya bereaksi bila `toKey` (invite) / `inviteId` (jawaban) cocok:
@@ -28,6 +34,59 @@
 export const INVITE_RANGE_M = 10;
 export const INVITE_DIALOG_MS = 20000; // dialog penerima hilang sendiri
 export const INVITE_OUT_TIMEOUT_MS = 25000; // pengaman pengundang
+
+// ---- SFX onomatopoeia + burst kelopak (Lane D; PRODUCT.md § Motion) ----
+// Teks SFX khas lembah, partikel = kelopak sakura + daun + bintang — BUKAN
+// asap/shard Sakuga. Hanya di momen undangan masuk / diterima. Mati bila
+// prefers-reduced-motion.
+const LH_REDUCED = typeof matchMedia === 'function'
+  && matchMedia('(prefers-reduced-motion: reduce)').matches;
+function lhFxCss() {
+  if (typeof document === 'undefined' || document.getElementById('lh-fx-style-invite')) return;
+  const st = document.createElement('style');
+  st.id = 'lh-fx-style-invite';
+  st.textContent = '.lh-sfx-nm{position:fixed;left:50%;top:38%;z-index:60;pointer-events:none;font-family:"Arial Rounded MT Bold","Hiragino Maru Gothic ProN","Hiragino Sans","Trebuchet MS",system-ui,sans-serif;font-weight:800;font-style:italic;font-size:clamp(34px,6vw,52px);letter-spacing:.02em;color:#ffc93c;-webkit-text-stroke:2px #1d2b53;text-shadow:4px 4px 0 rgba(29,43,83,.9);transform:translate(-50%,-50%) rotate(-6deg);animation:lh-sfx-nm-pop .9s cubic-bezier(.34,1.56,.64,1) forwards}'
+    + '@keyframes lh-sfx-nm-pop{0%{transform:translate(-50%,-50%) scale(.35) rotate(-12deg);opacity:0}25%{opacity:1;transform:translate(-50%,-50%) scale(1.18) rotate(-3deg)}55%{transform:translate(-50%,-50%) scale(1) rotate(-6deg);opacity:1}100%{transform:translate(-50%,-62%) scale(1.04) rotate(-6deg);opacity:0}}'
+    + '.lh-petal{position:fixed;z-index:60;pointer-events:none;animation:lh-petal-fly .9s ease-out forwards}'
+    + '@keyframes lh-petal-fly{to{transform:translate(var(--dx,0px),var(--dy,-60px)) rotate(var(--rot,180deg)) scale(.55);opacity:0}}'
+    + '#invite-dialog .primary-btn:active{transform:scale(.93)}'
+    + '@media (prefers-reduced-motion:reduce){.lh-sfx-nm,.lh-petal{animation:none!important;display:none!important}}';
+  document.head.appendChild(st);
+}
+function lhBurst(host) {
+  const cols = ['#ff8fb3', '#ffc93c', '#2fbf4a', '#ff5c8a'];
+  const shapes = ['50% 0 50% 50%', '50%', '0 50% 50% 50%']; // kelopak / bulat / daun
+  for (let i = 0; i < 10; i++) {
+    const p = document.createElement('span');
+    p.className = 'lh-petal';
+    p.setAttribute('aria-hidden', 'true');
+    const a = Math.random() * Math.PI * 2, d = 60 + Math.random() * 90;
+    p.style.setProperty('--dx', `${Math.cos(a) * d}px`);
+    p.style.setProperty('--dy', `${Math.sin(a) * d - 40}px`);
+    p.style.setProperty('--rot', `${(Math.random() * 360) | 0}deg`);
+    p.style.left = '50%';
+    p.style.top = '38%';
+    p.style.background = cols[i % cols.length];
+    p.style.borderRadius = shapes[i % shapes.length];
+    const s = 9 + Math.random() * 7;
+    p.style.width = `${s}px`;
+    p.style.height = `${s * 0.8}px`;
+    host.appendChild(p);
+    setTimeout(() => p.remove(), 950);
+  }
+}
+function lhSfx(text) {
+  if (LH_REDUCED || typeof document === 'undefined') return;
+  lhFxCss();
+  const host = document.getElementById('game-container') || document.body;
+  const el = document.createElement('div');
+  el.className = 'lh-sfx-nm';
+  el.textContent = text;
+  el.setAttribute('aria-hidden', 'true');
+  host.appendChild(el);
+  lhBurst(host);
+  setTimeout(() => el.remove(), 950);
+}
 
 function genInviteId() {
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
@@ -257,6 +316,7 @@ export class NmInvite {
       });
     }
     this._dialog?.classList.remove('hidden');
+    lhSfx('TING!'); // momen: undangan masuk
   }
 
   _hideDialog() {
@@ -287,6 +347,7 @@ export class NmInvite {
       inviteId: p.inviteId, from: this.getSelfName(), activity: p.activity,
     });
     this.mp?.broadcast('activity_join', { username: this.getSelfName(), activity: p.activity });
+    lhSfx('YEAY!'); // momen perayaan: undangan diterima, main bareng
     this.toast(this.t('inviteJoined', { u: p.from }));
   }
 
@@ -316,6 +377,7 @@ export class NmInvite {
       return;
     }
     this.mp?.broadcast('activity_join', { username: this.getSelfName(), activity });
+    lhSfx('YEAY!'); // momen perayaan: undangan diterima, main bareng
     this.toast(this.t('inviteJoined', { u: String(data.from || '').slice(0, 16) || '?' }));
     this._refreshButton();
   }

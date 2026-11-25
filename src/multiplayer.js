@@ -1,5 +1,12 @@
 // multiplayer.js — Room ephemeral "Main Bareng" via Supabase Realtime.
 //
+// Restyle visual Lane D (anime overhaul, 25 Nov 2026): sprite nama pemain
+// lain jadi pil kertas krem + outline tinta + teks display rounded
+// (bukan teks krem ber-outline gelap tanpa latar), SFX khas lembah
+// ("TING!") + burst kelopak saat pemain lain masuk room. Avatar remote
+// ikut buildCharacter (Lane B). Protokol Phoenix, presence, chat, posisi
+// TIDAK berubah.
+//
 // Arsitektur (keputusan koordinator): TANPA supabase-js, TANPA server baru.
 // WebSocket mentah ke endpoint Realtime project lembah-hijau dengan protokol
 // Phoenix v1 (array JSON [join_ref, ref, topic, event, payload], vsn=1.0.0):
@@ -60,18 +67,82 @@ function sanitizePresence(raw) {
   };
 }
 
+// ---- SFX onomatopoeia + burst kelopak (Lane D; PRODUCT.md § Motion) ----
+// Teks SFX khas lembah, partikel = kelopak sakura + daun + bintang — BUKAN
+// asap/shard Sakuga. Hanya saat pemain lain masuk room (bukan sinkronisasi
+// awal). Mati bila prefers-reduced-motion.
+const LH_REDUCED = typeof matchMedia === 'function'
+  && matchMedia('(prefers-reduced-motion: reduce)').matches;
+function lhFxCss() {
+  if (typeof document === 'undefined' || document.getElementById('lh-fx-style-mp')) return;
+  const st = document.createElement('style');
+  st.id = 'lh-fx-style-mp';
+  st.textContent = '.lh-sfx-nm{position:fixed;left:50%;top:38%;z-index:60;pointer-events:none;font-family:"Arial Rounded MT Bold","Hiragino Maru Gothic ProN","Hiragino Sans","Trebuchet MS",system-ui,sans-serif;font-weight:800;font-style:italic;font-size:clamp(34px,6vw,52px);letter-spacing:.02em;color:#ffc93c;-webkit-text-stroke:2px #1d2b53;text-shadow:4px 4px 0 rgba(29,43,83,.9);transform:translate(-50%,-50%) rotate(-6deg);animation:lh-sfx-nm-pop .9s cubic-bezier(.34,1.56,.64,1) forwards}'
+    + '@keyframes lh-sfx-nm-pop{0%{transform:translate(-50%,-50%) scale(.35) rotate(-12deg);opacity:0}25%{opacity:1;transform:translate(-50%,-50%) scale(1.18) rotate(-3deg)}55%{transform:translate(-50%,-50%) scale(1) rotate(-6deg);opacity:1}100%{transform:translate(-50%,-62%) scale(1.04) rotate(-6deg);opacity:0}}'
+    + '.lh-petal{position:fixed;z-index:60;pointer-events:none;animation:lh-petal-fly .9s ease-out forwards}'
+    + '@keyframes lh-petal-fly{to{transform:translate(var(--dx,0px),var(--dy,-60px)) rotate(var(--rot,180deg)) scale(.55);opacity:0}}'
+    + '@media (prefers-reduced-motion:reduce){.lh-sfx-nm,.lh-petal{animation:none!important;display:none!important}}';
+  document.head.appendChild(st);
+}
+function lhBurst(host) {
+  const cols = ['#ff8fb3', '#ffc93c', '#2fbf4a', '#ff5c8a'];
+  const shapes = ['50% 0 50% 50%', '50%', '0 50% 50% 50%']; // kelopak / bulat / daun
+  for (let i = 0; i < 10; i++) {
+    const p = document.createElement('span');
+    p.className = 'lh-petal';
+    p.setAttribute('aria-hidden', 'true');
+    const a = Math.random() * Math.PI * 2, d = 60 + Math.random() * 90;
+    p.style.setProperty('--dx', `${Math.cos(a) * d}px`);
+    p.style.setProperty('--dy', `${Math.sin(a) * d - 40}px`);
+    p.style.setProperty('--rot', `${(Math.random() * 360) | 0}deg`);
+    p.style.left = '50%';
+    p.style.top = '38%';
+    p.style.background = cols[i % cols.length];
+    p.style.borderRadius = shapes[i % shapes.length];
+    const s = 9 + Math.random() * 7;
+    p.style.width = `${s}px`;
+    p.style.height = `${s * 0.8}px`;
+    host.appendChild(p);
+    setTimeout(() => p.remove(), 950);
+  }
+}
+function lhSfx(text) {
+  if (LH_REDUCED || typeof document === 'undefined') return;
+  lhFxCss();
+  const host = document.getElementById('game-container') || document.body;
+  const el = document.createElement('div');
+  el.className = 'lh-sfx-nm';
+  el.textContent = text;
+  el.setAttribute('aria-hidden', 'true');
+  host.appendChild(el);
+  lhBurst(host);
+  setTimeout(() => el.remove(), 950);
+}
+
 // Sprite nama di atas kepala: canvas 2D -> texture. Teks via fillText saja
 // (bukan innerHTML), jadi username pemain lain tidak bisa injeksi markup.
+// Anime: pil kertas krem (--lh-paper) + outline tinta 3px + teks tinta
+// display rounded — terbaca di atas langit/sawah, bukan teks melayang.
 function makeNameSprite(username) {
   const canvas = document.createElement('canvas');
   canvas.width = 256; canvas.height = 64;
   const ctx = canvas.getContext('2d');
   const label = username.slice(0, 16);
-  ctx.font = '700 30px system-ui, sans-serif';
+  ctx.fillStyle = '#fff6e5';
+  ctx.strokeStyle = '#1d2b53';
+  ctx.lineWidth = 5;
+  if (typeof ctx.roundRect === 'function') {
+    ctx.beginPath();
+    ctx.roundRect(6, 8, 244, 48, 14);
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.fillRect(6, 8, 244, 48);
+    ctx.strokeRect(6, 8, 244, 48);
+  }
+  ctx.font = '800 28px "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "Trebuchet MS", system-ui, sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(43,33,24,0.9)';
-  ctx.strokeText(label, 128, 34);
-  ctx.fillStyle = '#fff8dc';
+  ctx.fillStyle = '#1d2b53';
   ctx.fillText(label, 128, 34);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -375,7 +446,11 @@ export class Multiplayer {
       if (state) {
         const isNew = !this.players.has(key);
         this.players.set(key, { ...state, key });
-        if (isNew) this.onEvent('player-joined', { username: state.username });
+        if (isNew) {
+          this.onEvent('player-joined', { username: state.username });
+          lhSfx('TING!'); // momen: pemain lain masuk room (hanya join susulan,
+          // bukan sinkronisasi awal presence_state)
+        }
       }
     }
     for (const key of Object.keys(leaves)) {

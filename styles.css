@@ -1,43 +1,53 @@
 /* ==========================================================================
-   Lembah Hijau — styles
-   Bahasa visual: material lembah itu sendiri — kertas krem, kayu, daun,
-   emas matahari. Token di :root (PRODUCT.md); semua warna downstream
-   WAJIB pakai token. Flat + hairline, bukan kartu melayang.
+   Lembah Hijau — styles (ANIME OVERHAUL, 25 Nov 2026 — Lane C)
+   Bahasa visual anime: langit biru jenuh, sakura, matahari emas, outline
+   ink 3px + hard offset shadow, display rounded bold. Token di :root
+   (PRODUCT.md); semua warna downstream WAJIB pakai token.
+   Mekanisme motion dari Sakuga (squash-and-stretch, spring overshoot,
+   burst canvas, SFX) — tampilan MILIK Lembah Hijau (kelopak sakura +
+   daun + bintang; SFX "PANEN!"/"TING!"/"DUAR!"/"YEAY!"/"HAP!").
    Landscape-first, responsif 390/768/1440, tap target >=44px.
    ========================================================================== */
 
 :root {
-  /* --- Token warna (PRODUCT.md) --- */
-  --lh-paper: #fff8dc;      /* panel kertas */
-  --lh-paper-2: #fffdf2;    /* permukaan panel lebih terang */
-  --lh-ink: #2b2118;        /* teks utama */
-  --lh-bark: #4a3419;       /* teks sekunder / kayu gelap */
-  --lh-leaf: #2e7d32;       /* hijau daun — satu-satunya hijau aksi */
-  --lh-valley: #5da244;     /* hijau rumput dunia 3D */
-  --lh-sun: #ffb340;        /* emas matahari — aksen sekali-sekali */
-  --lh-wood: #8a6b3f;       /* kayu — border & bingkai */
-  --lh-night: #16240f;      /* overlay gelap */
+  /* --- Token warna anime (PRODUCT.md, 25 Nov 2026) --- */
+  --lh-sky: #3fa9f5;        /* biru langit anime (vibrant) */
+  --lh-sky-deep: #1e6fd9;
+  --lh-sakura: #ff8fb3;     /* pink sakura, aksen utama */
+  --lh-sakura-deep: #ff5c8a;
+  --lh-sun: #ffc93c;        /* emas matahari anime */
+  --lh-sun-deep: #ff9f1c;
+  --lh-leaf: #2fbf4a;       /* hijau daun vibrant, aksi primer */
+  --lh-valley: #4fc94f;     /* hijau rumput dunia 3D */
+  --lh-ink: #1d2b53;        /* navy gelap — teks utama + outline anime */
+  --lh-paper: #fff6e5;      /* panel kertas krem hangat */
+  --lh-paper-2: #ffffff;
+  --lh-cream: #fff1c4;      /* krem matahari, teks di atas gelap */
+  --lh-wood: #8a6b3f;       /* kayu, dipakai hemat (bingkai/aksen saja) */
+  --lh-night: #141b3d;      /* overlay malam navy */
 
   /* --- Token turunan (dari token di atas, bukan warna bebas) --- */
-  --lh-pine: #2e5d23;       /* hijau daun gelap — judul display */
-  --lh-cream: #ffe9a8;      /* krem matahari — teks di atas gelap */
-  --lh-leaf-soft: #e8f5d8;  /* tint daun — state terpilih */
-  --lh-hairline: #d8c08d;   /* pemisah 1px */
-  --lh-hairline-soft: #c9b183; /* border kayu muda */
-  --lh-muted: #7a6547;      /* teks tersier */
-  --lh-note: #6b5844;       /* teks catatan */
-  --lh-hint: #5a4630;       /* teks subjudul */
-  --lh-stone: #7d6c52;      /* tombol sekunder — 5.07:1 vs putih, lolos WCAG AA */
-  --lh-leaf-dark: #276b2b;   /* hover tombol daun */
-  --lh-stone-dark: #6f6046;  /* hover tombol sekunder — 6.11:1 */
-  --lh-sun-dark: #ffa726;    /* hover tombol emas */
-  --lh-white: #ffffff;       /* teks di atas permukaan berwarna */
-  --lh-danger: #b3261e;     /* aksi destruktif */
+  --lh-leaf-soft: #dcf8e3;  /* state terpilih */
+  --lh-sky-soft: #d6ecff;
+  --lh-sakura-soft: #ffe3ee;
+  --lh-hairline: #e8cfa8;   /* pemisah 1px */
+  --lh-muted: #6b6f8e;      /* teks tersier */
+  --lh-note: #5a5e7a;       /* teks catatan */
+  --lh-danger: #cf2b2b;     /* aksi destruktif — diperdalam Lane E dari #e23a3a agar putih 5.21:1 (dulu 4.29:1) */
   --lh-error-bg: #7f1d1d;   /* kotak error */
-  --lh-sun-deep: #f6c98a;   /* krem senja — fallback preview */
-  --lh-leaf-tint: rgba(46, 125, 50, .14);
-  --lh-shadow: 0 10px 28px rgba(43, 33, 24, .22);
+  --lh-white: #ffffff;
+  --lh-shadow: 4px 4px 0 rgba(29, 43, 83, .9); /* hard offset shadow anime, tanpa blur */
 
+  /* --- Nama lama (dipakai kelas lain) dipetakan ke token anime --- */
+  --lh-pine: #1d2b53;       /* dulu hijau daun gelap — kini ink */
+  --lh-bark: #1d2b53;       /* dulu kayu gelap — kini ink */
+  --lh-leaf-dark: #1e9e3a;  /* hover tombol daun */
+  --lh-stone: #6b6f8e;      /* tombol sekunder */
+  --lh-stone-dark: #5a5e7a;
+  --lh-sun-dark: #ff9f1c;   /* hover tombol emas */
+  --lh-hairline-soft: #e8cfa8;
+  --lh-hint: #5a5e7a;       /* teks subjudul */
+  --lh-leaf-tint: rgba(47, 191, 74, .16);
   /* --- Spacing (skala 4/8/12/16/24) --- */
   --lh-s1: 4px;
   --lh-s2: 8px;
@@ -45,17 +55,18 @@
   --lh-s4: 16px;
   --lh-s6: 24px;
 
-  /* --- Radius: panel 18 / tombol 12 / chip 999 --- */
-  --lh-r-panel: 18px;
-  --lh-r-btn: 12px;
+  /* --- Radius: panel 20 / tombol 14 / chip 999 --- */
+  --lh-r-panel: 20px;
+  --lh-r-btn: 14px;
   --lh-r-chip: 999px;
 
   /* --- Tipografi --- */
-  --lh-display: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+  --lh-display: "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "Hiragino Sans", "Trebuchet MS", system-ui, sans-serif;
   --lh-text: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
   /* --- Motion --- */
   --lh-ease: cubic-bezier(.22, 1, .36, 1);
+  --lh-spring: cubic-bezier(.34, 1.56, .64, 1); /* spring overshoot (Sakuga-mekanisme) */
   --lh-t-fast: 160ms;
 }
 
@@ -90,7 +101,7 @@ button { font-family: inherit; cursor: pointer; min-height: 44px; }
 ::selection { background: var(--lh-sun); color: var(--lh-ink); }
 input, select { caret-color: var(--lh-leaf); }
 :focus-visible {
-  outline: 3px solid var(--lh-leaf);
+  outline: 3px solid var(--lh-sakura-deep);
   outline-offset: 2px;
   border-radius: var(--lh-r-btn);
 }
@@ -103,10 +114,10 @@ input, select { caret-color: var(--lh-leaf); }
 .modal-panel::-webkit-scrollbar-track,
 .start-panel::-webkit-scrollbar-track { background: transparent; }
 
-/* --- Judul display: serif buku cerita, leading rapat --- */
+/* --- Judul display: rounded bold anime, bobot 800, leading rapat --- */
 h1, h2 {
   font-family: var(--lh-display);
-  font-weight: 700;
+  font-weight: 800;
   line-height: 1.15;
   text-wrap: balance;
 }
@@ -143,14 +154,15 @@ h1, h2 {
   #hud-right::-webkit-scrollbar { display: none; }
   #hud-right .hud-btn { flex-shrink: 0; }
 }
-/* Chip kertas flat — bukan pill gelap: kertas + border kayu, radius tombol. */
+/* Chip kertas anime — kertas + outline ink 3px + hard shadow, radius tombol. */
 #coins-display, #day-display {
   background: var(--lh-paper);
   color: var(--lh-ink);
-  font-weight: 700;
+  font-weight: 800;
   padding: var(--lh-s2) 14px;
-  border: 2px solid var(--lh-wood);
+  border: 3px solid var(--lh-ink);
   border-radius: var(--lh-r-btn);
+  box-shadow: var(--lh-shadow);
   font-size: clamp(14px, 2.2vw, 18px);
   width: max-content; max-width: 70vw;
   font-variant-numeric: tabular-nums;
@@ -159,15 +171,16 @@ h1, h2 {
 .hud-btn {
   pointer-events: auto;
   background: var(--lh-paper-2);
-  border: 2px solid var(--lh-wood);
+  border: 3px solid var(--lh-ink);
   border-radius: var(--lh-r-btn);
   padding: var(--lh-s2) 14px;
   font-size: clamp(13px, 2vw, 16px);
   font-weight: 700; color: var(--lh-bark);
+  box-shadow: var(--lh-shadow);
   transition: transform var(--lh-t-fast) var(--lh-ease), background-color var(--lh-t-fast) var(--lh-ease);
 }
 .hud-btn:hover { background: var(--lh-paper); }
-.hud-btn:active { transform: scale(.97); }
+.hud-btn:active { transform: scale(.93); }
 #inv-bar {
   position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
   display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 46vw;
@@ -186,9 +199,10 @@ h1, h2 {
   position: absolute; bottom: 118px; left: 50%; transform: translateX(-50%);
   background: var(--lh-paper);
   color: var(--lh-ink);
-  border: 2px solid var(--lh-wood);
+  border: 3px solid var(--lh-ink);
   padding: var(--lh-s2) var(--lh-s4);
   border-radius: var(--lh-r-btn);
+  box-shadow: var(--lh-shadow);
   font-size: clamp(13px, 2vw, 16px);
   max-width: 86vw; text-align: center;
   transition: opacity 400ms var(--lh-ease);
@@ -205,8 +219,9 @@ h1, h2 {
   position: absolute; top: 76px; right: 12px; z-index: 5;
   pointer-events: auto;
   background: var(--lh-paper);
-  border: 2px solid var(--lh-wood);
+  border: 3px solid var(--lh-ink);
   border-radius: var(--lh-r-panel);
+  box-shadow: var(--lh-shadow);
   padding: 2px var(--lh-s2) var(--lh-s2);
   width: max-content;
 }
@@ -220,7 +235,7 @@ h1, h2 {
 .minimap-toggle {
   width: 44px; height: 44px; min-height: 44px; padding: 0;
   display: flex; align-items: center; justify-content: center;
-  background: transparent; border: none; border-radius: 10px; color: var(--lh-bark);
+  background: transparent; border: none; border-radius: var(--lh-r-btn); color: var(--lh-bark);
   transition: background-color var(--lh-t-fast) var(--lh-ease), transform var(--lh-t-fast) var(--lh-ease);
 }
 .minimap-toggle:hover { background: var(--lh-leaf-soft); }
@@ -239,12 +254,14 @@ h1, h2 {
 #touch-controls { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
 #joystick {
   position: absolute; left: 18px; bottom: 18px; width: 128px; height: 128px; border-radius: 50%;
-  background: rgba(255, 248, 220, .22); border: 2px solid rgba(255, 248, 220, .6);
+  background: rgba(214, 236, 255, .30); border: 3px solid var(--lh-ink);
+  box-shadow: var(--lh-shadow);
   pointer-events: auto; touch-action: none;
 }
 #joystick-knob {
   position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; border-radius: 50%;
-  background: var(--lh-paper); border: 2px solid var(--lh-wood);
+  background: var(--lh-paper); border: 3px solid var(--lh-ink);
+  box-shadow: 2px 2px 0 rgba(29, 43, 83, .9);
   transform: translate(-50%, -50%);
 }
 #action-buttons { position: absolute; right: 18px; bottom: 22px; display: flex; gap: 14px; align-items: flex-end; pointer-events: auto; }
@@ -255,8 +272,9 @@ h1, h2 {
 #touch-controls.riding-exit #btn-run,
 #touch-controls.riding-exit #btn-jump { display: none; }
 .round-btn {
-  width: 64px; height: 64px; border-radius: 50%; border: 2px solid var(--lh-wood);
+  width: 64px; height: 64px; border-radius: 50%; border: 3px solid var(--lh-ink);
   background: var(--lh-paper); font-size: 26px; color: var(--lh-bark); min-height: 64px;
+  box-shadow: var(--lh-shadow);
   transition: transform var(--lh-t-fast) var(--lh-ease);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
 }
@@ -284,10 +302,11 @@ h1, h2 {
 .rotate-icon .ui-icon { width: 64px; height: 64px; }
 
 /* ---------- Panels / modals ---------- */
-/* Satu bahasa: permukaan kertas FLAT, border kayu 2px, bayangan lembut ber-offset. */
+/* Satu bahasa anime: permukaan kertas krem, outline ink 3px, hard offset
+   shadow (tanpa blur). Satu elemen dominan per layar. */
 .panel {
   background: var(--lh-paper);
-  border: 2px solid var(--lh-wood);
+  border: 3px solid var(--lh-ink);
   border-radius: var(--lh-r-panel);
   padding: 22px;
   box-shadow: var(--lh-shadow); /* taste-skill-ignore: real modal overlay, shadow allowed */
@@ -295,7 +314,7 @@ h1, h2 {
 #start-screen {
   position: absolute; inset: 0; z-index: 20;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(46, 38, 20, .40); /* flat scrim over the live 3D scene — warm, light enough for golden hour to glow through */
+  background: rgba(20, 27, 61, .45); /* flat scrim over the live 3D scene — warm, light enough for golden hour to glow through */
   padding: var(--lh-s3); overflow: auto;
 }
 .start-panel { max-width: 560px; width: 100%; text-align: center; max-height: 94vh; overflow: auto; }
@@ -305,45 +324,47 @@ h1, h2 {
 #char-select { display: flex; gap: var(--lh-s3); justify-content: center; margin-bottom: var(--lh-s4); flex-wrap: wrap; }
 .char-card {
   display: flex; flex-direction: column; gap: 2px; align-items: center; padding: var(--lh-s3) 20px;
-  background: var(--lh-paper-2); border: 2px solid var(--lh-hairline-soft);
+  background: var(--lh-paper-2); border: 3px solid var(--lh-ink);
   border-radius: 14px; font-size: 16px; font-weight: 700; color: var(--lh-bark);
   transition: border-color var(--lh-t-fast) var(--lh-ease), background-color var(--lh-t-fast) var(--lh-ease);
 }
-.char-card.selected { border-color: var(--lh-leaf); background: var(--lh-leaf-soft); }
+.char-card.selected { border-color: var(--lh-leaf); background: var(--lh-leaf-soft); box-shadow: var(--lh-shadow); transform: translateY(-2px); }
 .char-desc { font-size: 13px; font-weight: 600; color: var(--lh-muted); }
 .primary-btn {
-  background: var(--lh-leaf); color: var(--lh-white); border: none; border-radius: var(--lh-r-btn);
+  background: var(--lh-leaf); color: var(--lh-ink); border: 3px solid var(--lh-ink); border-radius: var(--lh-r-btn);
   padding: var(--lh-s3) 26px;
   font-size: clamp(15px, 2.4vw, 18px); font-weight: 800;
+  box-shadow: var(--lh-shadow);
   transition: transform var(--lh-t-fast) var(--lh-ease), background-color var(--lh-t-fast) var(--lh-ease);
 }
-.primary-btn:hover { background: var(--lh-leaf-dark); }
-.primary-btn:active { transform: scale(.97); }
-.primary-btn:disabled { opacity: .45; cursor: not-allowed; }
-.primary-btn.secondary { background: var(--lh-stone); }
-.primary-btn.secondary:hover { background: var(--lh-stone-dark); }
+.primary-btn:hover { background: var(--lh-leaf); box-shadow: 6px 6px 0 rgba(29, 43, 83, .9); transform: translateY(-2px); }
+.primary-btn:active { transform: scale(.93); }
+.primary-btn:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+.primary-btn.secondary { background: var(--lh-sakura-soft); color: var(--lh-ink); }
+.primary-btn.secondary:hover { background: var(--lh-sakura); }
 .controls-hint, .save-note { margin-top: var(--lh-s3); font-size: clamp(12px, 2vw, 14px); color: var(--lh-note); }
 .modal {
   position: absolute; inset: 0; z-index: 15;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(22, 36, 15, .55); padding: var(--lh-s3);
+  background: rgba(20, 27, 61, .55); padding: var(--lh-s3);
 }
 .modal-panel { max-width: 520px; width: 100%; max-height: 88vh; overflow: auto; }
 .modal-panel h2 { margin-bottom: var(--lh-s3); color: var(--lh-pine); font-size: clamp(19px, 3.4vw, 24px); }
 .modal-panel > h2 { margin-top: 2px; }
 @keyframes panel-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(10px) scale(.94); }
+  60% { opacity: 1; transform: translateY(0) scale(1.02); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
-.modal-panel, .start-panel { animation: panel-in 200ms var(--lh-ease); }
+.modal-panel, .start-panel, .nm-panel { animation: panel-in 260ms var(--lh-spring); }
 .tabs { display: flex; gap: var(--lh-s2); margin-bottom: var(--lh-s3); }
 .tab {
-  flex: 1; padding: 10px; border-radius: 10px;
-  border: 2px solid var(--lh-wood); background: var(--lh-paper-2);
+  flex: 1; padding: 10px; border-radius: var(--lh-r-btn);
+  border: 3px solid var(--lh-ink); background: var(--lh-paper-2);
   font-weight: 800; font-size: 15px; color: var(--lh-bark);
-  transition: background-color var(--lh-t-fast) var(--lh-ease), color var(--lh-t-fast) var(--lh-ease);
+  transition: background-color var(--lh-t-fast) var(--lh-ease), color var(--lh-t-fast) var(--lh-ease), transform 260ms var(--lh-spring);
 }
-.tab.active { background: var(--lh-leaf); color: var(--lh-white); border-color: var(--lh-leaf); }
+.tab.active { background: var(--lh-leaf); color: var(--lh-ink); border-color: var(--lh-ink); box-shadow: var(--lh-shadow); transform: translateY(-2px); }
 /* Baris daftar: flat + hairline, bukan kartu-dalam-kartu. */
 .shop-row, .crop-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -359,29 +380,31 @@ h1, h2 {
 .shop-row .sub, .crop-row .sub { font-size: 13px; color: var(--lh-muted); }
 .buy-btn {
   background: var(--lh-sun); color: var(--lh-ink);
-  border: none; border-radius: 10px; padding: 9px 16px;
+  border: 3px solid var(--lh-ink); border-radius: var(--lh-r-btn); padding: 9px 16px;
   font-weight: 800; white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  box-shadow: 3px 3px 0 rgba(29, 43, 83, .9);
   transition: transform var(--lh-t-fast) var(--lh-ease), opacity var(--lh-t-fast) var(--lh-ease);
 }
 .buy-btn:hover { background: var(--lh-sun-dark); }
-.buy-btn:active { transform: scale(.97); }
+.buy-btn:active { transform: scale(.93); }
 .buy-btn:disabled { opacity: .45; cursor: not-allowed; }
 #shop-coins { font-weight: 800; margin: 10px 0; color: var(--lh-bark); font-variant-numeric: tabular-nums; }
 .row-btns { display: flex; gap: 10px; margin-top: var(--lh-s3); flex-wrap: wrap; }
 .row-btns .primary-btn { flex: 1; }
 .danger-btn {
-  background: var(--lh-danger); color: var(--lh-white); border: none;
+  background: var(--lh-danger); color: var(--lh-white); border: 3px solid var(--lh-ink);
   border-radius: var(--lh-r-btn); padding: var(--lh-s3) 18px; font-weight: 800;
+  box-shadow: var(--lh-shadow);
   transition: transform var(--lh-t-fast) var(--lh-ease), opacity var(--lh-t-fast) var(--lh-ease);
 }
-.danger-btn:active { transform: scale(.97); }
+.danger-btn:active { transform: scale(.93); }
 .modal-panel label {
   display: flex; justify-content: space-between; align-items: center; gap: var(--lh-s3);
   margin-bottom: var(--lh-s3); font-weight: 700;
 }
 .modal-panel select {
-  padding: 10px; border-radius: 10px; border: 2px solid var(--lh-wood);
+  padding: 10px; border-radius: var(--lh-r-btn); border: 3px solid var(--lh-ink);
   font-size: 15px; background: var(--lh-paper-2); color: var(--lh-ink);
   min-height: 44px; max-width: 60%;
 }
@@ -399,11 +422,46 @@ h1, h2 {
 #toast {
   position: absolute; bottom: 200px; left: 50%; transform: translateX(-50%); z-index: 30;
   background: var(--lh-paper); color: var(--lh-ink);
-  border: 2px solid var(--lh-wood); border-radius: var(--lh-r-btn);
+  border: 3px solid var(--lh-ink); border-radius: var(--lh-r-btn);
   padding: 10px 18px;
   font-weight: 700; font-size: clamp(13px, 2.2vw, 16px); max-width: 88vw; text-align: center;
   pointer-events: none;
   box-shadow: var(--lh-shadow); /* taste-skill-ignore: toast is a real overlay above the game */
+  animation: lh-toast-in 260ms var(--lh-spring);
+}
+@keyframes lh-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px) scale(.94); }
+  60% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1.03); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
+
+/* ---------- Efek perayaan anime (Lane C) ---------- */
+/* Satu canvas overlay untuk burst partikel (mekanisme Sakuga, bentuk
+   MILIK KITA: kelopak sakura + daun + bintang — bukan asap/shard Sakuga)
+   + layer SFX onomatopoeia khas lembah. Keduanya ephemeral (<1 dtk),
+   pointer-events none, dan mati total di prefers-reduced-motion. */
+#lh-fx-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  z-index: 60; pointer-events: none;
+}
+#lh-sfx-layer {
+  position: absolute; inset: 0; z-index: 61;
+  pointer-events: none; overflow: hidden;
+}
+.lh-sfx {
+  position: absolute; transform: translate(-50%, -50%);
+  font-family: var(--lh-display); font-style: italic; font-weight: 800;
+  font-size: clamp(28px, 6vw, 46px); line-height: 1;
+  color: var(--lh-sakura-deep);
+  text-shadow: 3px 3px 0 var(--lh-ink);
+  letter-spacing: .02em; white-space: nowrap;
+  animation: lh-sfx-pop 700ms var(--lh-spring) forwards;
+}
+@keyframes lh-sfx-pop {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.6) rotate(-6deg); }
+  25% { opacity: 1; transform: translate(-50%, -50%) scale(1.12) rotate(2deg); }
+  60% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0deg); }
+  100% { opacity: 0; transform: translate(-50%, -62%) scale(1.05) rotate(0deg); }
 }
 
 /* ---------- Ajak Main (undangan main bareng, Lane C) ---------- */
@@ -415,7 +473,7 @@ h1, h2 {
   position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);
   z-index: 30; width: max-content; max-width: 92vw;
   background: var(--lh-paper); color: var(--lh-ink);
-  border: 2px solid var(--lh-wood); border-radius: var(--lh-r-panel);
+  border: 3px solid var(--lh-ink); border-radius: var(--lh-r-panel);
   padding: var(--lh-s3) var(--lh-s4);
   text-align: center;
 }
@@ -428,7 +486,7 @@ h1, h2 {
 #error-box {
   position: absolute; top: 10px; left: 10px; right: 10px; z-index: 50;
   background: var(--lh-error-bg); color: var(--lh-white);
-  padding: var(--lh-s3); border-radius: 10px; font-size: 14px; white-space: pre-wrap;
+  padding: var(--lh-s3); border-radius: var(--lh-r-btn); font-size: 14px; white-space: pre-wrap;
 }
 
 /* ---------- Akun (username + PIN) ---------- */
@@ -446,7 +504,7 @@ h1, h2 {
   margin-bottom: var(--lh-s2); font-weight: 700;
 }
 .auth-label input {
-  padding: 10px 12px; border-radius: 10px; border: 2px solid var(--lh-wood); font-size: 16px;
+  padding: 10px 12px; border-radius: var(--lh-r-btn); border: 3px solid var(--lh-ink); font-size: 16px;
   background: var(--lh-paper-2); color: var(--lh-ink); min-height: 44px; width: 200px; max-width: 55%;
 }
 .auth-label input::placeholder { color: var(--lh-muted); }
@@ -465,8 +523,8 @@ h1, h2 {
 .custom-preview-wrap { flex: 0 0 300px; margin: 0 auto; text-align: center; }
 #custom-preview {
   width: 300px; height: 340px; max-width: 78vw; border-radius: 14px;
-  border: 2px solid var(--lh-hairline-soft);
-  background: var(--lh-sun-deep);
+  border: 3px solid var(--lh-ink);
+  background: var(--lh-sky-soft);
   display: block;
 }
 .custom-gender { display: flex; gap: var(--lh-s2); margin-top: 10px; }
@@ -480,18 +538,18 @@ h1, h2 {
 }
 .custom-nav { display: flex; align-items: center; gap: var(--lh-s2); margin-bottom: 6px; }
 .custom-arrow {
-  min-width: 44px; min-height: 44px; border-radius: 10px; border: 2px solid var(--lh-wood);
+  min-width: 44px; min-height: 44px; border-radius: var(--lh-r-btn); border: 3px solid var(--lh-ink);
   background: var(--lh-paper-2); font-size: 20px; font-weight: 800; color: var(--lh-bark);
   transition: transform var(--lh-t-fast) var(--lh-ease);
 }
-.custom-arrow:active { transform: scale(.97); }
+.custom-arrow:active { transform: scale(.93); }
 .custom-model-name { flex: 1; text-align: center; font-weight: 700; }
 .custom-swatches { display: flex; gap: 6px; flex-wrap: wrap; }
 /* Hit target 44px; cakram warna di dalam via background-clip, bukan tombol 32px. */
 .swatch {
   width: 44px; height: 44px; min-height: 44px;
   border-radius: 50%;
-  border: 2px solid rgba(43, 33, 24, .25);
+  border: 2px solid rgba(29, 43, 83, .25);
   background-clip: padding-box;
   padding: 5px;
   transition: transform var(--lh-t-fast) var(--lh-ease);
@@ -538,6 +596,9 @@ h1, h2 {
 @media (prefers-reduced-motion: reduce) {
   .rotate-icon { animation: none; }
   .modal-panel, .start-panel { animation: none; }
+  #toast { animation: none; }
+  #lh-fx-canvas, #lh-sfx-layer { display: none; }
+  .lh-sfx { animation: none; }
   *, *::before, *::after {
     transition-duration: .01ms !important;
     animation-duration: .01ms !important;
@@ -552,7 +613,7 @@ h1, h2 {
 #room-indicator {
   display: inline-flex; align-items: center; gap: var(--lh-s2);
   background: var(--lh-paper-2); color: var(--lh-bark);
-  border: 2px solid var(--lh-wood); border-radius: var(--lh-r-chip);
+  border: 3px solid var(--lh-ink); border-radius: var(--lh-r-chip);
   padding: var(--lh-s2) var(--lh-s3); font-weight: 700; font-size: 14px;
   font-variant-numeric: tabular-nums; white-space: nowrap;
 }
@@ -562,13 +623,13 @@ h1, h2 {
 .room-status { font-weight: 700; color: var(--lh-bark); margin-bottom: var(--lh-s3); }
 .room-code-box {
   display: flex; align-items: center; gap: var(--lh-s3); flex-wrap: wrap;
-  background: var(--lh-paper-2); border: 2px solid var(--lh-wood);
+  background: var(--lh-paper-2); border: 3px solid var(--lh-ink);
   border-radius: var(--lh-r-panel); padding: var(--lh-s3) var(--lh-s4);
   margin-bottom: var(--lh-s4);
 }
 .room-code-label { font-size: 14px; color: var(--lh-bark); font-weight: 700; }
 .room-code {
-  font-family: var(--lh-display); font-weight: 700; font-size: 32px;
+  font-family: var(--lh-display); font-weight: 800; font-size: 32px;
   letter-spacing: .14em; color: var(--lh-pine);
   font-variant-numeric: tabular-nums; line-height: 1.1;
 }
@@ -577,12 +638,12 @@ h1, h2 {
 .room-join-row input, .room-chat-row input {
   flex: 1 1 auto; min-width: 0; min-height: 44px;
   font-family: var(--lh-text); font-size: 16px; color: var(--lh-ink);
-  background: var(--lh-paper-2); border: 2px solid var(--lh-wood);
+  background: var(--lh-paper-2); border: 3px solid var(--lh-ink);
   border-radius: var(--lh-r-btn); padding: var(--lh-s2) var(--lh-s3);
 }
 .room-join-row input { text-transform: uppercase; letter-spacing: .14em; }
 .room-join-row input:focus-visible, .room-chat-row input:focus-visible {
-  outline: 3px solid var(--lh-leaf); outline-offset: 2px;
+  outline: 3px solid var(--lh-sakura-deep); outline-offset: 2px;
 }
 .room-join-row .primary-btn, .room-chat-row .primary-btn { min-height: 44px; flex: 0 0 auto; }
 .room-section-title {
@@ -599,7 +660,7 @@ h1, h2 {
 .room-player-you { color: var(--lh-muted); }
 .room-player-empty { color: var(--lh-muted); font-weight: 400; }
 .room-chat-log {
-  background: var(--lh-paper-2); border: 2px solid var(--lh-wood);
+  background: var(--lh-paper-2); border: 3px solid var(--lh-ink);
   border-radius: var(--lh-r-panel); padding: var(--lh-s3) var(--lh-s4);
   min-height: 88px; max-height: 160px; overflow-y: auto;
   margin-bottom: var(--lh-s3);
@@ -622,14 +683,15 @@ h1, h2 {
    label saat pemain masuk zona). Belum dirujuk elemen mana pun di lane ini
    (index.html / ui.js di luar batas lane P). Token PRODUCT.md saja. */
 .nm-badge {
-  font-family: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+  font-family: var(--lh-display);
   font-weight: 700;
-  color: var(--lh-paper);
-  background: var(--lh-wood);
-  border: 2px solid var(--lh-sun);
+  color: var(--lh-ink);
+  background: var(--lh-sakura-deep);
+  border: 3px solid var(--lh-ink);
   border-radius: 999px; /* chip: PRODUCT.md radius chip 999px */
   padding: 8px 16px;
   letter-spacing: .04em;
+  box-shadow: var(--lh-shadow);
 }
 /* NIGHT MARKET P — end */
 
@@ -640,7 +702,7 @@ h1, h2 {
 .nm-modal {
   position: absolute; inset: 0; z-index: 16;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(22, 36, 15, .55); padding: var(--lh-s3);
+  background: rgba(20, 27, 61, .55); padding: var(--lh-s3);
 }
 .nm-panel { max-width: 440px; width: 100%; max-height: 88vh; overflow: auto; }
 .nm-panel h2 { color: var(--lh-pine); font-size: clamp(19px, 3.4vw, 24px); margin-bottom: var(--lh-s1); }
@@ -656,7 +718,7 @@ h1, h2 {
 .nm-aim { margin-bottom: var(--lh-s3); }
 .nm-aim-track {
   position: relative; height: 48px; touch-action: none; cursor: pointer;
-  background: var(--lh-paper-2); border: 2px solid var(--lh-wood);
+  background: var(--lh-paper-2); border: 3px solid var(--lh-ink);
   border-radius: var(--lh-r-btn); overflow: hidden;
 }
 .nm-aim-band {
@@ -666,7 +728,7 @@ h1, h2 {
 .nm-aim-dot {
   position: absolute; top: 50%; width: 18px; height: 18px;
   transform: translate(-50%, -50%);
-  background: var(--lh-sun); border: 2px solid var(--lh-bark); border-radius: 50%;
+  background: var(--lh-sun); border: 3px solid var(--lh-ink); border-radius: 50%;
 }
 .nm-aim-marker {
   position: absolute; top: 0; bottom: 0; left: 50%; width: 8px;
@@ -692,7 +754,7 @@ h1, h2 {
 /* NIGHT MARKET G — end */
 
 /* NIGHT MARKET R — start */
-#nm-dark { position: absolute; inset: 0; z-index: 4; background: #0a0618; opacity: 0; pointer-events: none; transition: opacity .8s ease; }
+#nm-dark { position: absolute; inset: 0; z-index: 4; background: #141b3d; opacity: 0; pointer-events: none; transition: opacity .8s ease; }
 @media (prefers-reduced-motion: reduce) { #nm-dark { transition: none; } }
 /* NIGHT MARKET R — end */
 

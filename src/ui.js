@@ -3,7 +3,7 @@
 // Keamanan: data pemain (username dll.) HANYA via textContent — tidak ada
 // innerHTML dari data pemain di mana pun di file ini.
 import * as THREE from 'three';
-import { t, applyI18n } from './i18n.js';
+import { t, applyI18n, LH_SFX } from './i18n.js';
 import { icon } from './icons.js';
 import { CROPS } from './farm.js';
 import { ANIMAL_DEFS } from './animals.js';
@@ -73,14 +73,23 @@ export class UI {
     this._mmCollapsed = false;
     this._mmLastDraw = 0;
     this._mmFallback = null;
+    // ---- Efek perayaan anime (Lane C, visual saja) ----
+    this._fxReduce = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this._fxParts = [];
+    this._fxRaf = 0;
     this._bind();
   }
   _bind() {
-    $('btn-start').addEventListener('click', () => this.h.onStart());
+    $('btn-start').addEventListener('click', () => {
+      this._celebrate('start', window.innerWidth / 2, window.innerHeight * 0.35);
+      this.h.onStart();
+    });
     document.querySelectorAll('.char-card').forEach((el2) => {
-      el2.addEventListener('click', () => {
+      el2.addEventListener('click', (e) => {
         document.querySelectorAll('.char-card').forEach((c) => c.classList.remove('selected'));
         el2.classList.add('selected');
+        this._celebrate('buy', e.clientX, e.clientY, 0.6);
         this.h.onGender(el2.dataset.gender);
       });
     });
@@ -163,8 +172,123 @@ export class UI {
     const e = $('toast');
     e.textContent = msg;
     e.classList.remove('hidden');
+    this._toastCelebrate(msg);
     clearTimeout(this._toastTimer);
     this._toastTimer = setTimeout(() => e.classList.add('hidden'), ms);
+  }
+
+  // ---------- Efek perayaan anime (Lane C) ----------
+  // Mekanisme Sakuga (burst di satu canvas overlay + SFX onomatopoeia),
+  // tampilan MILIK Lembah Hijau: partikel = kelopak sakura + daun +
+  // bintang (bukan asap/shard Sakuga); SFX = kosakata khas lembah
+  // (LH_SFX: "PANEN!"/"TING!"/"HAP!"/"YEAY!" — bukan katakana Sakuga).
+  // Visual saja: tidak mengubah state, handler, atau teks apa pun.
+  // Mati total bila prefers-reduced-motion (this._fxReduce).
+  _celebrate(kind, x, y, scale = 1) {
+    if (this._fxReduce) return;
+    const word = LH_SFX[kind];
+    if (word) this._fxSfx(word, x, y);
+    this._fxBurst(x, y, scale);
+  }
+  // Toast momen perayaan ikut meledak: panen / jual-beli / pagi hari /
+  // menang. Deteksi kata kunci ID + EN karena toast sudah diterjemahkan.
+  _toastCelebrate(msg) {
+    if (this._fxReduce || typeof msg !== 'string') return;
+    const cx = window.innerWidth / 2, cy = window.innerHeight * 0.32;
+    if (/Panen|Harvest/i.test(msg)) this._celebrate('harvest', cx, cy);
+    else if (/Terjual|Sold|Dibeli|Bought/i.test(msg)) this._celebrate('buy', cx, cy);
+    else if (/Selamat pagi|Good morning|Menang|You win|Dapat ikan|Caught a fish/i.test(msg)) this._celebrate('win', cx, cy);
+  }
+  _fxSfx(word, x, y) {
+    const layer = $('lh-sfx-layer');
+    if (!layer) return;
+    const s = el('div', 'lh-sfx', word);
+    s.style.left = `${x}px`;
+    s.style.top = `${y}px`;
+    layer.appendChild(s);
+    s.addEventListener('animationend', () => s.remove());
+    setTimeout(() => s.remove(), 900); // pengaman bila animationend tak jalan
+  }
+  _fxBurst(x, y, scale = 1) {
+    const canvas = $('lh-fx-canvas');
+    if (!canvas) return;
+    const host = canvas.parentElement || document.body;
+    const w = host.clientWidth || window.innerWidth;
+    const h = host.clientHeight || window.innerHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+    }
+    const COLORS = {
+      petal: ['#ff8fb3', '#ff5c8a', '#ffe3ee'],
+      leaf: ['#2fbf4a', '#4fc94f'],
+      star: ['#ffc93c', '#ff9f1c'],
+    };
+    const SHAPES = ['petal', 'petal', 'leaf', 'star'];
+    const n = Math.round(22 * scale) + 6;
+    const rect = canvas.getBoundingClientRect();
+    const cx = x - rect.left, cy = y - rect.top;
+    for (let i = 0; i < n; i++) {
+      const shape = SHAPES[i % SHAPES.length];
+      const palette = COLORS[shape];
+      const a = Math.random() * Math.PI * 2;
+      const sp = (60 + Math.random() * 160) * scale;
+      this._fxParts.push({
+        shape, x: cx, y: cy,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 90 * scale,
+        rot: Math.random() * Math.PI * 2, vr: (Math.random() - 0.5) * 8,
+        size: (5 + Math.random() * 7) * scale,
+        color: palette[Math.floor(Math.random() * palette.length)],
+        life: 0, maxLife: 0.55 + Math.random() * 0.35,
+      });
+    }
+    if (!this._fxRaf) this._fxRaf = requestAnimationFrame(() => this._fxTick());
+  }
+  _fxTick() {
+    const canvas = $('lh-fx-canvas');
+    this._fxRaf = 0;
+    if (!canvas) { this._fxParts = []; return; }
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+    const dt = 1 / 60;
+    this._fxParts = this._fxParts.filter((p) => {
+      p.life += dt;
+      if (p.life >= p.maxLife) return false;
+      p.vy += 260 * dt; // gravitasi ringan
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.rot += p.vr * dt;
+      const k = 1 - p.life / p.maxLife;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, k * 1.5);
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = p.color;
+      if (p.shape === 'petal') {
+        ctx.beginPath();
+        ctx.ellipse(0, 0, p.size * 0.6, p.size, 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (p.shape === 'leaf') {
+        ctx.beginPath();
+        ctx.moveTo(0, -p.size);
+        ctx.quadraticCurveTo(p.size * 0.8, 0, 0, p.size);
+        ctx.quadraticCurveTo(-p.size * 0.8, 0, 0, -p.size);
+        ctx.fill();
+      } else { // bintang 4-titik
+        ctx.beginPath();
+        ctx.moveTo(0, -p.size);
+        ctx.quadraticCurveTo(0, 0, p.size, 0);
+        ctx.quadraticCurveTo(0, 0, 0, p.size);
+        ctx.quadraticCurveTo(0, 0, -p.size, 0);
+        ctx.quadraticCurveTo(0, 0, 0, -p.size);
+        ctx.fill();
+      }
+      ctx.restore();
+      return true;
+    });
+    if (this._fxParts.length > 0) this._fxRaf = requestAnimationFrame(() => this._fxTick());
   }
   // Hint kontekstual: notifikasi 3 detik saja, lalu memudar. Dipanggil tiap
   // frame oleh main.js — teks yang SAMA tidak me-reset timer, jadi hint tidak
@@ -218,9 +342,8 @@ export class UI {
   // ---------- Minimap realtime ----------
   // Satu <canvas> 2D; digambar ulang max ~10 Hz (throttle di updateHUD yang
   // dipanggil tiap frame). Warna isi peta = warna dunia itu sendiri:
-  // rumput #6da344, sungai #56a8d0 (sama dengan tekstur air world.js),
-  // tanah jalan #9a7b4f, kayu #8a6b3f, emas #ffb340 hanya untuk rumah
-  // pemain + titik pemain. Sumbu peta: x → kanan, z → bawah (utara di atas).
+  // rumput #4fc94f (valley), sungai #3fa9f5 (sky), jalan/kayu #8a6b3f,
+  // emas #ffc93c (sun) hanya untuk rumah pemain + titik pemain. Sumbu peta: x → kanan, z → bawah (utara di atas).
   _toggleMinimap() {
     this._mmCollapsed = !this._mmCollapsed;
     $('minimap').classList.toggle('collapsed', this._mmCollapsed);
@@ -365,7 +488,7 @@ export class UI {
     const X = (x) => ox + (x - b.minX) * s;
     const Z = (z) => oy + (z - b.minZ) * s;
     const rect = (r) => { ctx.fillRect(X(r.x - r.w / 2), Z(r.z - r.d / 2), r.w * s, r.d * s); };
-    const WATER = '#56a8d0', GRASS = '#6da344', DIRT = '#9a7b4f', WOOD = '#8a6b3f';
+    const WATER = '#3fa9f5', GRASS = '#4fc94f', DIRT = '#8a6b3f', WOOD = '#8a6b3f';
     // Rumput.
     ctx.fillStyle = GRASS;
     ctx.fillRect(0, 0, cssW, cssH);
@@ -398,9 +521,9 @@ export class UI {
     }
     // Kebun (tanah olahan + garis petak).
     if (data.farm) {
-      ctx.fillStyle = '#a08050';
+      ctx.fillStyle = '#e8cfa8'; // tanah olahan — hairline krem
       rect(data.farm);
-      ctx.strokeStyle = '#6b5233';
+      ctx.strokeStyle = '#1d2b53'; // garis petak — ink
       ctx.lineWidth = 1;
       const fx = X(data.farm.x - data.farm.w / 2), fz = Z(data.farm.z - data.farm.d / 2);
       for (let i = 1; i < FARM_COLS; i++) {
@@ -417,7 +540,7 @@ export class UI {
     }
     // Kandang (pagar kayu, isi krem).
     if (data.pen) {
-      ctx.fillStyle = '#e6d9b8';
+      ctx.fillStyle = '#fff6e5'; // kandang — paper
       rect(data.pen);
       ctx.strokeStyle = WOOD;
       ctx.lineWidth = 1.5;
@@ -427,14 +550,14 @@ export class UI {
     // titik wahana/game + stan jajanan. Data dari world.minimapData.
     if (data.nightmarket) {
       const nm = data.nightmarket;
-      ctx.fillStyle = '#3a2a1a';
+      ctx.fillStyle = '#141b3d'; // pasar malam — night
       ctx.fillRect(X(nm.rect.minX), Z(nm.rect.minZ),
         (nm.rect.maxX - nm.rect.minX) * s, (nm.rect.maxZ - nm.rect.minZ) * s);
-      ctx.strokeStyle = '#ffb340';
+      ctx.strokeStyle = '#ffc93c';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(X(nm.rect.minX), Z(nm.rect.minZ),
         (nm.rect.maxX - nm.rect.minX) * s, (nm.rect.maxZ - nm.rect.minZ) * s);
-      ctx.fillStyle = '#ffb340';
+      ctx.fillStyle = '#ffc93c';
       for (const r of nm.rides) {
         ctx.beginPath(); ctx.arc(X(r.x), Z(r.z), 2, 0, Math.PI * 2); ctx.fill();
       }
@@ -444,35 +567,35 @@ export class UI {
         }
       }
       if (nm.gate) {
-        ctx.fillStyle = '#fff8dc';
+        ctx.fillStyle = '#fff6e5';
         ctx.fillRect(X(nm.gate.x) - 2, Z(nm.gate.z) - 2, 4, 4);
       }
     }
     // Rumah: rumah pemain emas, rumah lain kayu. Toko: daun.
     for (const h of data.houses) {
-      ctx.fillStyle = h.player ? '#ffb340' : WOOD;
+      ctx.fillStyle = h.player ? '#ffc93c' : WOOD;
       rect(h);
-      ctx.strokeStyle = '#2b2118';
+      ctx.strokeStyle = '#1d2b53';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(X(h.x - h.w / 2), Z(h.z - h.d / 2), h.w * s, h.d * s);
     }
     if (data.shop) {
-      ctx.fillStyle = '#2e7d32';
+      ctx.fillStyle = '#2fbf4a'; // toko — leaf
       rect(data.shop);
-      ctx.strokeStyle = '#2b2118';
+      ctx.strokeStyle = '#1d2b53';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(X(data.shop.x - data.shop.w / 2), Z(data.shop.z - data.shop.d / 2), data.shop.w * s, data.shop.d * s);
     }
     // Kincir (baling-baling) / sumur (lingkaran air + ring kayu).
     if (data.windmill) {
       const wx = X(data.windmill.x), wz = Z(data.windmill.z);
-      ctx.strokeStyle = '#4a3419';
+      ctx.strokeStyle = '#1d2b53';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(wx - 4, wz - 4); ctx.lineTo(wx + 4, wz + 4);
       ctx.moveTo(wx + 4, wz - 4); ctx.lineTo(wx - 4, wz + 4);
       ctx.stroke();
-      ctx.fillStyle = '#4a3419';
+      ctx.fillStyle = '#1d2b53';
       ctx.beginPath(); ctx.arc(wx, wz, 2, 0, Math.PI * 2); ctx.fill();
     }
     if (data.well) {
@@ -497,10 +620,10 @@ export class UI {
       ctx.save();
       ctx.translate(px, py);
       ctx.rotate(Math.PI - f);
-      ctx.fillStyle = 'rgba(255, 253, 242, .9)';
+      ctx.fillStyle = 'rgba(255, 246, 229, .9)';
       ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#ffb340';
-      ctx.strokeStyle = '#2b2118';
+      ctx.fillStyle = '#ffc93c';
+      ctx.strokeStyle = '#1d2b53';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(0, -7); ctx.lineTo(5, 5); ctx.lineTo(-5, 5); ctx.closePath();
@@ -519,15 +642,15 @@ export class UI {
       for (const rp of remotes) {
         if (typeof rp.x !== 'number' || typeof rp.z !== 'number') continue;
         const rx = X(rp.x), ry = Z(rp.z);
-        ctx.fillStyle = '#ffb340';
-        ctx.strokeStyle = '#2b2118';
+        ctx.fillStyle = '#ffc93c';
+        ctx.strokeStyle = '#1d2b53';
         ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(rx, ry, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
         if (cssW >= 140 && rp.username) {
           const label = String(rp.username).slice(0, 8);
-          ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,253,242,.9)';
+          ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,246,229,.9)';
           ctx.strokeText(label, rx, ry - 8);
-          ctx.fillStyle = '#2b2118';
+          ctx.fillStyle = '#1d2b53';
           ctx.fillText(label, rx, ry - 8);
         }
       }
@@ -793,17 +916,17 @@ export class UI {
       const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0xffe9b8); // krem senja — token kertas/emas, bukan oranye datar
+      scene.background = new THREE.Color(0xd6ecff); // langit anime — sky-soft, bukan krem senja
       const camera = new THREE.PerspectiveCamera(40, 300 / 340, 0.1, 100);
       camera.position.set(0, 1.6, 5.2);
       camera.lookAt(0, 1.1, 0);
-      const sun = new THREE.DirectionalLight(0xffd9a0, 2.0);
+      const sun = new THREE.DirectionalLight(0xfff1c4, 2.0); // cream matahari anime
       sun.position.set(3, 6, 4);
       scene.add(sun);
-      scene.add(new THREE.HemisphereLight(0xfff3d6, 0x6a8f4f, 0.9)); // langit krem hangat, tanah lembah
+      scene.add(new THREE.HemisphereLight(0xd6ecff, 0x4fc94f, 0.9)); // langit biru anime, tanah valley
       const ground = new THREE.Mesh(
         new THREE.CylinderGeometry(1.1, 1.3, 0.25, 12),
-        new THREE.MeshLambertMaterial({ color: 0x5da244 }),
+        new THREE.MeshLambertMaterial({ color: 0x4fc94f }),
       );
       ground.position.y = -0.12;
       scene.add(ground);
@@ -885,7 +1008,9 @@ export class UI {
     const btn = el('button', 'buy-btn');
     appendRichText(btn, mode === 'buy' ? `${t('buy', this.lang)} ${it.price} {coin}` : `${t('sell', this.lang)} ${it.price} {coin}`);
     btn.disabled = mode === 'sell' ? it.owned < 1 : false;
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      this._celebrate(mode === 'buy' ? 'buy' : 'sell', r.left + r.width / 2, r.top + r.height / 2, 0.7);
       if (mode === 'buy') this.h.onBuy(it.key, it.price, it.name);
       else this.h.onSell(it.key, it.price, it.name);
     });
@@ -914,7 +1039,11 @@ export class UI {
       const btn = el('button', 'buy-btn');
       appendRichText(btn, `${this.lang === 'id' ? 'Tanam' : 'Plant'} {sprout}`);
       btn.disabled = owned < 1;
-      btn.addEventListener('click', () => { this.closeCropPicker(); onPick(c.id); });
+      btn.addEventListener('click', (e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        this._celebrate('plant', r.left + r.width / 2, r.top + r.height / 2, 0.7);
+        this.closeCropPicker(); onPick(c.id);
+      });
       row.appendChild(btn);
       box.appendChild(row);
     }

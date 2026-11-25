@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#1d2b1a">
+<meta name="theme-color" content="#3fa9f5">
 <meta name="lh-api-base" content="https://ajsliyqjucgdtbimvdtd.supabase.co/functions/v1/lembah-hijau-api">
 <meta name="lh-supabase-anon-key" content="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFqc2xpeXFqdWNnZHRiaW12ZHRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTUyNjkyMTYsImV4cCI6MjExMDg0NTIxNn0.zaBP6JZZMpSu_JLIOkGabiJtDk5h2V0WmlRDoxGJ_6M">
 <title>Lembah Hijau — Game Berkebun</title>
@@ -233,6 +233,11 @@
   </div>
 
   <div id="toast" class="hidden" aria-live="polite"></div>
+  <!-- Efek perayaan anime (Lane C): satu canvas overlay burst partikel
+       (kelopak sakura + daun + bintang) + layer SFX onomatopoeia khas
+       lembah. Digambar ui.js; pointer-events none; mati di reduced-motion. -->
+  <canvas id="lh-fx-canvas" aria-hidden="true"></canvas>
+  <div id="lh-sfx-layer" aria-hidden="true"></div>
   <!-- Undangan "Ajak Main" (Lane C): kartu kecil tengah-bawah, bukan modal. -->
   <div id="invite-dialog" class="hidden" role="dialog" aria-live="polite">
     <p id="invite-dialog-text"></p>

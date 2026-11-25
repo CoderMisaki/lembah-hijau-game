@@ -12,8 +12,36 @@ export const HOUSE = { minX: -3, maxX: 5, minZ: -26, maxZ: -19 }; // rumah pemai
 export const SHOP = { minX: -12, maxX: -6, minZ: -26, maxZ: -20 }; // kios toko
 export const CRATE_START = { x: 7, z: -15 };
 
+// ---- Anime cel/toon kit (Lane A): gradientMap 4-step + outline ink.
+// Semua material dunia memakai MeshToonMaterial via mat()/toonMat().
+// Token PRODUCT.md: ink #1d2b53, sky #3fa9f5, sakura #ff8fb3, sun #ffc93c,
+// leaf #2fbf4a, valley #4fc94f, cream #fff1c4.
+export const INK = 0x1d2b53;
+export const TOON_GRADIENT = (() => {
+  const data = new Uint8Array([90, 150, 210, 255]); // 4 step cel
+  const tex = new THREE.DataTexture(data, 4, 1, THREE.RedFormat);
+  tex.minFilter = THREE.NearestFilter;
+  tex.magFilter = THREE.NearestFilter;
+  tex.needsUpdate = true;
+  return tex;
+})();
+export function toonMat(color, opts = {}) {
+  return new THREE.MeshToonMaterial({ color, gradientMap: TOON_GRADIENT, ...opts });
+}
+// Outline tegas anime: inverted hull (BackSide, warna ink) sebagai anak mesh.
+// Hanya untuk objek hero (rumah, pohon sakura hero, hewan, wahana besar);
+// objek kecil/instanced cukup toon shading.
+export function addOutline(mesh, s = 1.035) {
+  const o = new THREE.Mesh(mesh.geometry,
+    new THREE.MeshBasicMaterial({ color: INK, side: THREE.BackSide }));
+  o.scale.setScalar(s);
+  o.castShadow = false; o.receiveShadow = false;
+  mesh.add(o);
+  return o;
+}
+
 function mat(color, opts = {}) {
-  return new THREE.MeshLambertMaterial({ color, ...opts });
+  return toonMat(color, opts);
 }
 
 export function buildWorld(scene) {
@@ -98,14 +126,14 @@ export function buildWorld(scene) {
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
   const colors = new Float32Array(pos.count * 3);
-  const cGrassA = new THREE.Color(0x4e8f3a), cGrassB = new THREE.Color(0x7fb84f);
-  const cGrassC = new THREE.Color(0x9ccb5e); // rumput muda terang
-  const cMeadow = new THREE.Color(0x6da344); // patch padang lebih gelap
+  const cGrassA = new THREE.Color(0x3fae4a), cGrassB = new THREE.Color(0x6fd35a);
+  const cGrassC = new THREE.Color(0xa8e063); // rumput muda terang
+  const cMeadow = new THREE.Color(0x58b368); // patch padang lebih gelap
   const cSand = new THREE.Color(0xc2a878), cRock = new THREE.Color(0x8d8578);
   const cSnow = new THREE.Color(0xf4f8ff), cDirt = new THREE.Color(0x9a7b4f);
   const cDirtEdge = new THREE.Color(0xa98d63);
-  const cBloomPink = new THREE.Color(0xe8a0b8), cBloomYellow = new THREE.Color(0xf2d06b),
-        cBloomWhite = new THREE.Color(0xf5f2e8), cBloomLav = new THREE.Color(0xb9a7e6);
+  const cBloomPink = new THREE.Color(0xff8fb3), cBloomYellow = new THREE.Color(0xffd94d),
+        cBloomWhite = new THREE.Color(0xf5f2e8), cBloomLav = new THREE.Color(0xc9a7ff);
   const pathBlend = (d) => 1 - smoothstep(1.1, 1.7, d);
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), z = pos.getZ(i);
@@ -141,7 +169,7 @@ export function buildWorld(scene) {
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
-  const terrain = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  const terrain = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: TOON_GRADIENT }));
   terrain.receiveShadow = true;
   group.add(terrain);
 
@@ -164,6 +192,39 @@ export function buildWorld(scene) {
   );
   scene.add(sky);
 
+  // ---- Matahari bergaris anime: disc kuning + 8 sinar (berputar pelan),
+  // mengikuti arah directional light; bulan pucat untuk malam.
+  // Basic material (fog:false) supaya tetap cerah di langit; posisi diatur update().
+  const sunDiscMat = new THREE.MeshBasicMaterial({ color: 0xffc93c, fog: false, transparent: true, opacity: 0.95 });
+  const sunRayMat = new THREE.MeshBasicMaterial({ color: 0xffc93c, fog: false, transparent: true, opacity: 0.7 });
+  const sunGroup = new THREE.Group();
+  const sunDisc = new THREE.Mesh(new THREE.CircleGeometry(15, 24), sunDiscMat);
+  sunGroup.add(sunDisc);
+  const sunRays = new THREE.Group();
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2;
+    const ray = new THREE.Mesh(new THREE.PlaneGeometry(3, 24), sunRayMat);
+    ray.position.set(Math.cos(a) * 27, Math.sin(a) * 27, -0.5);
+    ray.rotation.z = a - Math.PI / 2;
+    sunRays.add(ray);
+  }
+  sunGroup.add(sunRays);
+  scene.add(sunGroup);
+  const moonGroup = new THREE.Group();
+  const moonDisc = new THREE.Mesh(new THREE.CircleGeometry(10, 24),
+    new THREE.MeshBasicMaterial({ color: 0xfff6d8, fog: false }));
+  moonGroup.add(moonDisc);
+  for (const [mx, my, mr] of [[-3, 2, 2.2], [3, -3, 1.6], [2, 4, 1.2]]) {
+    const crater = new THREE.Mesh(new THREE.CircleGeometry(mr, 12),
+      new THREE.MeshBasicMaterial({ color: 0xe8dcb8, fog: false }));
+    crater.position.set(mx, my, 0.1);
+    moonGroup.add(crater);
+  }
+  moonGroup.position.set(-240, 200, -180);
+  moonGroup.lookAt(0, 10, 0);
+  moonGroup.visible = false;
+  scene.add(moonGroup);
+
   // ---- Pegunungan berlapis di kejauhan: 2 cincin kerucut low-poly + salju.
   // Duduk di luar terrain (r 150–210); kabut (fog far 320) yang menyatukannya.
   const mtnSpots = [];
@@ -179,12 +240,15 @@ export function buildWorld(scene) {
     mtnSpots.push({ x: Math.cos(a) * r, z: Math.sin(a) * r,
       h: 48 + rnd() * 22, rad: 26 + rnd() * 14, near: false });
   }
-  const mtnGeo = new THREE.ConeGeometry(1, 1, 6);
+  // Kerucut non-indexed + computeVertexNormals = faset datar
+  // (pengganti flatShading, yang tidak didukung MeshToonMaterial).
+  const mtnGeo = new THREE.ConeGeometry(1, 1, 6).toNonIndexed();
+  mtnGeo.computeVertexNormals();
   const mtns = new THREE.InstancedMesh(mtnGeo,
-    new THREE.MeshLambertMaterial({ flatShading: true }), mtnSpots.length);
+    new THREE.MeshToonMaterial({ gradientMap: TOON_GRADIENT }), mtnSpots.length);
   const snowCaps = new THREE.InstancedMesh(mtnGeo,
-    new THREE.MeshLambertMaterial({ color: 0xf4f8ff, flatShading: true }), mtnSpots.length);
-  const cMtnNearA = new THREE.Color(0x6f7f66), cMtnNearB = new THREE.Color(0x8a938a);
+    new THREE.MeshToonMaterial({ color: 0xf4f8ff, gradientMap: TOON_GRADIENT }), mtnSpots.length);
+  const cMtnNearA = new THREE.Color(0x6fae7d), cMtnNearB = new THREE.Color(0x8fd0a0);
   const cMtnFarA = new THREE.Color(0x7d8aa0), cMtnFarB = new THREE.Color(0x9aa7bd);
   mtnSpots.forEach((m, i) => {
     const baseY = terrainHeight(m.x, m.z) - 3;
@@ -206,7 +270,7 @@ export function buildWorld(scene) {
   const waterCanvas = document.createElement('canvas');
   waterCanvas.width = 128; waterCanvas.height = 128;
   const wc = waterCanvas.getContext('2d');
-  wc.fillStyle = '#56a8d0'; wc.fillRect(0, 0, 128, 128);
+  wc.fillStyle = '#3fa9f5'; wc.fillRect(0, 0, 128, 128);
   wc.strokeStyle = 'rgba(255,255,255,0.75)'; wc.lineWidth = 2.5;
   for (let i = 0; i < 10; i++) {
     wc.beginPath();
@@ -232,11 +296,10 @@ export function buildWorld(scene) {
     wpos.setX(i, riverCenterX(z) + wpos.getX(i));
   }
   waterGeo.computeVertexNormals();
-  // Phong: kilau specular matahari di permukaan + tekstur mengalir + riak vertex.
-  // Opacity diturunkan (0.88 → 0.62): air jernih, dasar sungai terlihat.
-  const water = new THREE.Mesh(waterGeo, new THREE.MeshPhongMaterial({
-    map: waterTex, transparent: true, opacity: 0.62,
-    shininess: 180, specular: 0xddf2ff,
+  // Toon: air langit cerah + tekstur mengalir + riak vertex + buih putih
+  // bergerak (highlight). Opacity saja — tanpa refleksi mahal.
+  const water = new THREE.Mesh(waterGeo, new THREE.MeshToonMaterial({
+    map: waterTex, transparent: true, opacity: 0.62, gradientMap: TOON_GRADIENT,
   }));
   water.position.y = WATER_Y;
   group.add(water);
@@ -246,7 +309,7 @@ export function buildWorld(scene) {
   // searah offset tekstur) — air terlihat mengalir, bukan diam.
   const FOAM_N = 24;
   const foamGeo = new THREE.BoxGeometry(0.35, 0.03, 1.6);
-  const foamMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+  const foamMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.65 });
   const foam = new THREE.InstancedMesh(foamGeo, foamMat, FOAM_N);
   const foamData = [];
   for (let i = 0; i < FOAM_N; i++) {
@@ -305,6 +368,7 @@ export function buildWorld(scene) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, WALL_H, d), wallMat);
     m.position.set(px, hy + WALL_H / 2, pz);
     m.castShadow = true; m.receiveShadow = true;
+    addOutline(m);
     house.add(m);
     return m;
   }
@@ -313,6 +377,7 @@ export function buildWorld(scene) {
   wallPanel(WALL_T, 6 - 2 * WALL_T, hx + 4 - WALL_T / 2, hz); // kanan
   const roof = new THREE.Mesh(new THREE.ConeGeometry(6.4, 2.6, 4), mat(0x9a4a2f));
   roof.position.set(hx, hy + 4.7, hz); roof.rotation.y = Math.PI / 4; roof.castShadow = true;
+  addOutline(roof);
   house.add(roof);
   // Bagian depan (dinding depan + pintu + jendela + tangga): satu grup supaya
   // show() kamar bisa menyembunyikannya sekaligus saat interior tampil.
@@ -320,12 +385,13 @@ export function buildWorld(scene) {
   const frontWall = new THREE.Mesh(new THREE.BoxGeometry(8, WALL_H, WALL_T), wallMat);
   frontWall.position.set(hx, hy + WALL_H / 2, hz + 3 - WALL_T / 2);
   frontWall.castShadow = true; frontWall.receiveShadow = true;
+  addOutline(frontWall);
   houseFront.add(frontWall);
   const door = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.2, 0.2), mat(0x6e4a26));
   door.position.set(hx, hy + 1.1, hz + 3.05); houseFront.add(door);
   // Jendela menyala hangat — emissive dinaikkan saat senja/malam di update().
   // winMat dipakai bersama semua rumah desa + kincir, jadi ikut menyala juga.
-  const winMat = new THREE.MeshLambertMaterial({ color: 0xffe9a8, emissive: 0xff9a3c, emissiveIntensity: 0.25 });
+  const winMat = new THREE.MeshToonMaterial({ color: 0xffe9a8, emissive: 0xff9a3c, emissiveIntensity: 0.25, gradientMap: TOON_GRADIENT });
   for (const wx of [hx - 2.4, hx + 2.4]) {
     const win = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.1, 0.15), winMat);
     win.position.set(wx, hy + 1.9, hz + 3.05); houseFront.add(win);
@@ -342,13 +408,13 @@ export function buildWorld(scene) {
   step.position.set(hx, hy + 0.12, hz + 3.4); step.receiveShadow = true; houseFront.add(step);
   house.add(houseFront);
   const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), mat(0x8d8578));
-  chimney.position.set(hx + 2.2, hy + 5.2, hz - 1); house.add(chimney);
+  chimney.position.set(hx + 2.2, hy + 5.2, hz - 1); addOutline(chimney); house.add(chimney);
   // Lampu teras (menyala saat malam)
   const lamp = new THREE.PointLight(0xffc46b, 0, 14, 1.6);
   lamp.position.set(hx, hy + 2.6, hz + 3.6);
   house.add(lamp);
   const lampBulb = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8),
-    new THREE.MeshLambertMaterial({ color: 0xffe9a8, emissive: 0xffb340 }));
+    mat(0xffe9a8, { emissive: 0xffb340 }));
   lampBulb.position.copy(lamp.position); house.add(lampBulb);
   group.add(house);
   colliders.push({ ...HOUSE });
@@ -385,7 +451,7 @@ export function buildWorld(scene) {
     const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.25, 6), mat(0xf5f2e8));
     candle.position.set(3.0, hy + 0.92, -24.6); bedroomGroup.add(candle);
     const flame = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 6),
-      new THREE.MeshLambertMaterial({ color: 0xffd27a, emissive: 0xff9a3c, emissiveIntensity: 1.5 }));
+      mat(0xffd27a, { emissive: 0xff9a3c, emissiveIntensity: 1.5 }));
     flame.position.set(3.0, hy + 1.08, -24.6); bedroomGroup.add(flame);
     // Jendela interior (dinding belakang, pakai winMat yang sama — ikut menyala malam).
     const winIn = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.1, 0.08), winMat);
@@ -421,9 +487,9 @@ export function buildWorld(scene) {
   const sx = (SHOP.minX + SHOP.maxX) / 2, sz = (SHOP.minZ + SHOP.maxZ) / 2;
   const sy = terrainHeight(sx, sz);
   const stall = new THREE.Mesh(new THREE.BoxGeometry(6, 2.4, 4), mat(0xd8b36a));
-  stall.position.set(sx, sy + 1.2, sz); stall.castShadow = true; shop.add(stall);
+  stall.position.set(sx, sy + 1.2, sz); stall.castShadow = true; addOutline(stall); shop.add(stall);
   const shopRoof = new THREE.Mesh(new THREE.ConeGeometry(4.6, 1.8, 4), mat(0xb03a2e));
-  shopRoof.position.set(sx, sy + 3.3, sz); shopRoof.rotation.y = Math.PI / 4; shop.add(shopRoof);
+  shopRoof.position.set(sx, sy + 3.3, sz); shopRoof.rotation.y = Math.PI / 4; addOutline(shopRoof); shop.add(shopRoof);
   const counter = new THREE.Mesh(new THREE.BoxGeometry(5, 1, 0.8), mat(0x6e4a26));
   counter.position.set(sx, sy + 0.5, sz + 2.4); shop.add(counter);
   // Papan nama toko (tekstur canvas prosedural "TOKO") di depan, di bawah atap.
@@ -432,10 +498,10 @@ export function buildWorld(scene) {
   const sg = signCanvas.getContext('2d');
   sg.fillStyle = '#8a6b3f'; sg.fillRect(0, 0, 256, 64);
   sg.strokeStyle = '#fff8dc'; sg.lineWidth = 4; sg.strokeRect(4, 4, 248, 56);
-  sg.fillStyle = '#fff8dc'; sg.font = 'bold 40px Georgia, serif';
+  sg.fillStyle = '#fff8dc'; sg.font = 'bold 40px "Trebuchet MS", "Arial Rounded MT Bold", sans-serif';
   sg.textAlign = 'center'; sg.textBaseline = 'middle'; sg.fillText('TOKO', 128, 34);
   const sign = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.8, 0.12),
-    new THREE.MeshLambertMaterial({ map: new THREE.CanvasTexture(signCanvas) }));
+    new THREE.MeshToonMaterial({ map: new THREE.CanvasTexture(signCanvas), gradientMap: TOON_GRADIENT }));
   sign.position.set(sx, sy + 2.55, sz + 2.12); shop.add(sign);
   // Keranjang hasil panen di depan kios (di luar collider SHOP, tanpa collider).
   for (const [bx, cols] of [[sx - 2.4, [0xe87a2a, 0xd9382b]], [sx + 2.4, [0x9ccb5e, 0xe8912a]]]) {
@@ -462,13 +528,14 @@ export function buildWorld(scene) {
     const wallH = 3.0 + (h.w - 5) * 0.2;
     const walls = new THREE.Mesh(new THREE.BoxGeometry(h.w, wallH, h.d), mat(h.wall));
     walls.position.set(0, y + wallH / 2, 0); walls.castShadow = true; walls.receiveShadow = true;
+    addOutline(walls);
     g.add(walls);
     if (h.roofType === 'pyramid') {
       const r = new THREE.Mesh(new THREE.ConeGeometry(Math.hypot(h.w, h.d) / 2 * 0.95, 2.2, 4), mat(h.roof));
-      r.position.set(0, y + wallH + 1.1, 0); r.rotation.y = Math.PI / 4; r.castShadow = true; g.add(r);
+      r.position.set(0, y + wallH + 1.1, 0); r.rotation.y = Math.PI / 4; r.castShadow = true; addOutline(r); g.add(r);
     } else if (h.roofType === 'cone') {
       const r = new THREE.Mesh(new THREE.ConeGeometry(h.w * 0.62, 2.4, 8), mat(h.roof));
-      r.position.set(0, y + wallH + 1.2, 0); r.castShadow = true; g.add(r);
+      r.position.set(0, y + wallH + 1.2, 0); r.castShadow = true; addOutline(r); g.add(r);
     } else { // gable (pelana): dua papan miring bertemu di bubungan
       const rise = h.d * 0.3;
       const half = h.d / 2 + 0.3;
@@ -477,7 +544,7 @@ export function buildWorld(scene) {
       for (const s of [1, -1]) {
         const slab = new THREE.Mesh(new THREE.BoxGeometry(h.w + 0.8, 0.15, slabLen), mat(h.roof));
         slab.position.set(0, y + wallH + rise / 2, s * (h.d / 4 + 0.12));
-        slab.rotation.x = s * ang; slab.castShadow = true; g.add(slab);
+        slab.rotation.x = s * ang; slab.castShadow = true; addOutline(slab, 1.06); g.add(slab);
       }
     }
     const door = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.1, 0.15), mat(0x6e4a26));
@@ -488,7 +555,7 @@ export function buildWorld(scene) {
     }
     if (h.chimney) {
       const ch = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.6, 0.7), mat(0x8d8578));
-      ch.position.set(h.w / 4, y + wallH + 1.5, -h.d / 4); g.add(ch);
+      ch.position.set(h.w / 4, y + wallH + 1.5, -h.d / 4); addOutline(ch); g.add(ch);
     }
     const step = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.22, 0.8), mat(0x8d8578));
     step.position.set(0, y + 0.11, h.d / 2 + 0.45); step.receiveShadow = true; g.add(step);
@@ -513,7 +580,7 @@ export function buildWorld(scene) {
   const wellY = terrainHeight(SQUARE.x, SQUARE.z);
   const well = new THREE.Group();
   const wellBase = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.1, 1.0, 8), mat(0x8d8578));
-  wellBase.position.y = 0.5; wellBase.castShadow = true; well.add(wellBase);
+  wellBase.position.y = 0.5; wellBase.castShadow = true; addOutline(wellBase); well.add(wellBase);
   const wellDark = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.12, 8), mat(0x2b2118));
   wellDark.position.y = 1.02; well.add(wellDark);
   for (const s of [-1, 1]) {
@@ -521,7 +588,7 @@ export function buildWorld(scene) {
     post.position.set(s * 0.95, 1.2, 0); well.add(post);
   }
   const wellRoof = new THREE.Mesh(new THREE.ConeGeometry(1.5, 1.0, 4), mat(0x8a4a2f));
-  wellRoof.position.y = 2.9; wellRoof.rotation.y = Math.PI / 4; wellRoof.castShadow = true; well.add(wellRoof);
+  wellRoof.position.y = 2.9; wellRoof.rotation.y = Math.PI / 4; wellRoof.castShadow = true; addOutline(wellRoof); well.add(wellRoof);
   well.position.set(SQUARE.x, wellY, SQUARE.z);
   group.add(well);
   colliders.push({ minX: SQUARE.x - 1.2, maxX: SQUARE.x + 1.2, minZ: SQUARE.z - 1.2, maxZ: SQUARE.z + 1.2 });
@@ -541,8 +608,8 @@ export function buildWorld(scene) {
 
   // ---- Danau kedua + dermaga kayu (timur laut). Air dangkal, dasar pasir terlihat.
   const lakeWater = new THREE.Mesh(new THREE.CircleGeometry(1, 28),
-    new THREE.MeshPhongMaterial({ color: 0x56a8d0, transparent: true, opacity: 0.7,
-      shininess: 120, specular: 0xddf2ff }));
+    new THREE.MeshToonMaterial({ color: 0x3fa9f5, transparent: true, opacity: 0.7,
+      gradientMap: TOON_GRADIENT }));
   lakeWater.geometry.rotateX(-Math.PI / 2);
   lakeWater.scale.set(LAKE.rx, 1, LAKE.rz);
   lakeWater.position.set(LAKE.x, 0.05, LAKE.z);
@@ -563,9 +630,9 @@ export function buildWorld(scene) {
   const windmillY = terrainHeight(WINDMILL.x, WINDMILL.z);
   const windmill = new THREE.Group();
   const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 2.2, 9, 8), mat(0xd8c9a8));
-  tower.position.y = 4.5; tower.castShadow = true; windmill.add(tower);
+  tower.position.y = 4.5; tower.castShadow = true; addOutline(tower); windmill.add(tower);
   const cap = new THREE.Mesh(new THREE.ConeGeometry(1.9, 2.0, 8), mat(0x8a4a2f));
-  cap.position.y = 10; cap.castShadow = true; windmill.add(cap);
+  cap.position.y = 10; cap.castShadow = true; addOutline(cap); windmill.add(cap);
   const wmDoor = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.0, 0.15), mat(0x6e4a26));
   wmDoor.position.set(0, 1.0, 2.1); windmill.add(wmDoor);
   const wmWin = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.12), winMat);
@@ -626,9 +693,9 @@ export function buildWorld(scene) {
   const hayX = PEN.minX - 2.2, hayZ = PEN.maxZ + 1.6;
   const hayY = terrainHeight(hayX, hayZ);
   const hayBase = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.3, 0.9, 8), mat(0xd9a441));
-  hayBase.position.y = 0.45; hayBase.castShadow = true; hay.add(hayBase);
+  hayBase.position.y = 0.45; hayBase.castShadow = true; addOutline(hayBase); hay.add(hayBase);
   const hayTop = new THREE.Mesh(new THREE.ConeGeometry(1.25, 1.4, 8), mat(0xe8b84a));
-  hayTop.position.y = 1.55; hayTop.castShadow = true; hay.add(hayTop);
+  hayTop.position.y = 1.55; hayTop.castShadow = true; addOutline(hayTop); hay.add(hayTop);
   hay.position.set(hayX, hayY, hayZ);
   group.add(hay);
 
@@ -651,7 +718,7 @@ export function buildWorld(scene) {
   // bergerombol + buah. 4 jenis: pinus (kerucut berlapis, tanpa buah), apel
   // (buah merah), jeruk (buah oranye), rindang (tajuk bulat, tanpa buah).
   // Semua penempatan pakai rnd() ber-seed — stabil antar load.
-  const TREE_TYPES = ['pine', 'apple', 'orange', 'leafy'];
+  const TREE_TYPES = ['pine', 'apple', 'orange', 'leafy', 'sakura'];
   const treeSpots = [];
   // Kebun buah: petak 4x4 di (48,48), apel/jeruk berselang.
   for (let gx = 0; gx < 4; gx++) for (let gz = 0; gz < 4; gz++) {
@@ -687,8 +754,9 @@ export function buildWorld(scene) {
   // Susun daftar instans: batang, cabang (1-3/pohon), gumpalan tajuk (2-4/pohon
   // daun; pinus 2 kerucut), buah (4-7/pohon buah, menempel di tajuk).
   const barkCols = [0x5a3d24, 0x6e4a26, 0x7d5a33, 0x4a3419].map((c) => new THREE.Color(c));
-  const crownA = new THREE.Color(0x35873a), crownB = new THREE.Color(0x7fb84f);
-  const pineA = new THREE.Color(0x2e6b34), pineB = new THREE.Color(0x4a8f3c);
+  const crownA = new THREE.Color(0x2fbf4a), crownB = new THREE.Color(0x8fe388);
+  const pineA = new THREE.Color(0x2a9d4a), pineB = new THREE.Color(0x4fc94f);
+  const sakuraCols = [0xff8fb3, 0xffb3c9, 0xff5c8a].map((c) => new THREE.Color(c));
   const branchList = [], blobList = [], coneList = [], fruitList = [];
   const UP = new THREE.Vector3(0, 1, 0);
   let fruitTrees = 0;
@@ -711,7 +779,11 @@ export function buildWorld(scene) {
       for (let b = 0; b < nBl; b++) {
         const a = rnd() * Math.PI * 2, rr = rnd() * 0.9 * p.s;
         const bl = { x: p.x + Math.cos(a) * rr, y: topY + 0.7 * p.s + (rnd() - 0.5) * 0.8 * p.s,
-          z: p.z + Math.sin(a) * rr, s: (1.1 + rnd() * 0.6) * p.s };
+          z: p.z + Math.sin(a) * rr, s: (1.1 + rnd() * 0.6) * p.s,
+          // Sakura: kanopi pink berlapis (3 tone); lainnya hijau terang.
+          c: p.type === 'sakura'
+            ? sakuraCols[Math.floor(rnd() * sakuraCols.length)].clone()
+            : crownA.clone().lerp(crownB, rnd()) };
         blobs.push(bl); blobList.push(bl);
       }
       if (p.type === 'apple' || p.type === 'orange') {
@@ -761,7 +833,7 @@ export function buildWorld(scene) {
   blobList.forEach((bl, i) => {
     m4.compose(new THREE.Vector3(bl.x, bl.y, bl.z), q, new THREE.Vector3(bl.s, bl.s * 0.85, bl.s));
     crownBlobs.setMatrixAt(i, m4);
-    crownBlobs.setColorAt(i, crownA.clone().lerp(crownB, rnd()));
+    crownBlobs.setColorAt(i, bl.c);
   });
   crownBlobs.instanceColor.needsUpdate = true;
   coneList.forEach((cn, i) => {
@@ -779,6 +851,26 @@ export function buildWorld(scene) {
   for (const cm of [trunks, branches, crownBlobs, pineCones, fruits]) {
     cm.castShadow = true;
     group.add(cm);
+  }
+
+  // ---- Sakura hero (3 pohon biasa, bukan instanced — dapat outline tegas):
+  // kanopi pink berlapis 3 tone di tepi alun-alun + dekat rumah/toko.
+  // Posisi dipilih di luar jalur (cek PATHS) + luar footprint rumah.
+  for (const [sx2, sz2, ss] of [[10, -27, 1.15], [24, -27, 1.0], [-6, -14, 1.25]]) {
+    const sy2 = terrainHeight(sx2, sz2);
+    const sak = new THREE.Group();
+    const strunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.36, 2.4, 6), mat(0x5a3d24));
+    strunk.position.y = 1.2; strunk.castShadow = true; addOutline(strunk); sak.add(strunk);
+    const sakCols = [0xff8fb3, 0xffb3c9, 0xff5c8a];
+    for (let k = 0; k < 3; k++) {
+      const blob = new THREE.Mesh(new THREE.SphereGeometry(1.35 - k * 0.25, 10, 8), mat(sakCols[k]));
+      blob.position.set((k - 1) * 0.9, 2.9 + k * 0.55, (k % 2 ? -0.4 : 0.35));
+      blob.scale.y = 0.8; blob.castShadow = true; addOutline(blob, 1.04); sak.add(blob);
+    }
+    sak.position.set(sx2, sy2, sz2);
+    sak.scale.setScalar(ss);
+    group.add(sak);
+    colliders.push({ minX: sx2 - 0.5, maxX: sx2 + 0.5, minZ: sz2 - 0.5, maxZ: sz2 + 0.5 });
   }
 
   // ---- Batu-batu (instanced dodecahedron)
@@ -827,7 +919,7 @@ export function buildWorld(scene) {
     bushSpots.push({ x: MEADOW.x + (rnd() - 0.5) * 30, z: MEADOW.z + (rnd() - 0.5) * 22, s: 0.6 + rnd() * 0.6 });
   }
   const bushes = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 7, 5), mat(0x4a8f3c), bushSpots.length);
-  const cBushA = new THREE.Color(0x3e7d32), cBushB = new THREE.Color(0x7fb84f);
+  const cBushA = new THREE.Color(0x2fbf4a), cBushB = new THREE.Color(0x8fe388);
   bushSpots.forEach((p, i) => {
     const y = terrainHeight(p.x, p.z);
     m4.compose(new THREE.Vector3(p.x, y + 0.35 * p.s, p.z), q, new THREE.Vector3(p.s, p.s * 0.65, p.s));
@@ -897,7 +989,7 @@ export function buildWorld(scene) {
     mat(0x4a7d2e), flowerSpots.length);
   const flowerHeads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.09, 6, 5),
     mat(0xffffff), flowerSpots.length);
-  const flowerPalette = [0xe8a0b8, 0xf2d06b, 0xf5f2e8, 0xb9a7e6, 0xf0a35e].map((c) => new THREE.Color(c));
+  const flowerPalette = [0xff8fb3, 0xffd94d, 0xffffff, 0xc9a7ff, 0xff9f1c].map((c) => new THREE.Color(c));
   flowerSpots.forEach((p, i) => {
     const y = terrainHeight(p.x, p.z);
     m4.compose(new THREE.Vector3(p.x, y + 0.17, p.z), q, new THREE.Vector3(1, 1, 1));
@@ -928,7 +1020,7 @@ export function buildWorld(scene) {
   const grassTufts = new THREE.InstancedMesh(new THREE.ConeGeometry(0.09, 0.55, 4),
     mat(0x6da344), grassData.length);
   grassTufts.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  const cGrassTuftA = new THREE.Color(0x5da244), cGrassTuftB = new THREE.Color(0x9ccb5e);
+  const cGrassTuftA = new THREE.Color(0x4fc94f), cGrassTuftB = new THREE.Color(0xa8e063);
   grassData.forEach((g, i) => {
     _dummy.position.set(g.x, g.y + 0.25 * g.s, g.z);
     _dummy.rotation.set(0, 0, 0);
@@ -944,6 +1036,7 @@ export function buildWorld(scene) {
   const crate = new THREE.Group();
   const crateMesh = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.4, 1.4), mat(0xa97c50));
   crateMesh.castShadow = true; crateMesh.receiveShadow = true;
+  addOutline(crateMesh);
   crate.add(crateMesh);
   const band = new THREE.Mesh(new THREE.BoxGeometry(1.46, 0.25, 1.46), mat(0x6e4a26));
   crate.add(band);
@@ -961,7 +1054,7 @@ export function buildWorld(scene) {
         z: cz + (rnd() - 0.5) * 3, s: 2.2 + rnd() * 2.4, drift });
     }
   }
-  const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.92, fog: false });
+  const cloudMat = mat(0xffffff, { transparent: true, opacity: 0.92, fog: false });
   const clouds = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 7, 5), cloudMat, cloudPuffs.length);
   clouds.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   cloudPuffs.forEach((p, i) => {
@@ -975,13 +1068,13 @@ export function buildWorld(scene) {
 
   // ---- Partikel halus: serbuk sari (siang) + kunang-kunang (malam).
   // THREE.Points, jumlah kecil; visibilitas diatur update() + setQuality().
-  function makePoints(n, color, size) {
+  function makePoints(n, color, size, cx = 0, cz = 0, spread = 70, yMin = 1, yMax = 5) {
     const g = new THREE.BufferGeometry();
     const arr = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
-      arr[i * 3] = (rnd() - 0.5) * 70;
-      arr[i * 3 + 1] = 1 + rnd() * 4;
-      arr[i * 3 + 2] = (rnd() - 0.5) * 70;
+      arr[i * 3] = cx + (rnd() - 0.5) * spread;
+      arr[i * 3 + 1] = yMin + rnd() * (yMax - yMin);
+      arr[i * 3 + 2] = cz + (rnd() - 0.5) * spread;
     }
     g.setAttribute('position', new THREE.BufferAttribute(arr, 3));
     const pts = new THREE.Points(g, new THREE.PointsMaterial({
@@ -994,7 +1087,10 @@ export function buildWorld(scene) {
   const pollenBase = pollen.geometry.attributes.position.array.slice();
   const fireflies = makePoints(40, 0xcfff8a, 0.22);
   const fireflyBase = fireflies.geometry.attributes.position.array.slice();
-  group.add(pollen); group.add(fireflies);
+  // Kelopak sakura beterbangan di sekitar pohon sakura hero (alun-alun + rumah).
+  const petals = makePoints(50, 0xff8fb3, 0.16, 8, -22, 46, 2, 7);
+  petals.material.opacity = 0.85;
+  group.add(pollen); group.add(fireflies); group.add(petals);
 
   // ---- Kupu-kupu: 4 ekor, sayap mengepak (2 pivot + 2 plane per ekor).
   const butterflies = [];
@@ -1004,7 +1100,7 @@ export function buildWorld(scene) {
     const body = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3, 4), mat(0x2b2118));
     body.rotation.x = Math.PI / 2; bg.add(body);
     const wings = [];
-    const wmat = new THREE.MeshLambertMaterial({ color: butterflyCols[b], side: THREE.DoubleSide });
+    const wmat = mat(butterflyCols[b], { side: THREE.DoubleSide });
     for (const s of [-1, 1]) {
       const pivot = new THREE.Object3D();
       const wing = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.18), wmat);
@@ -1019,27 +1115,28 @@ export function buildWorld(scene) {
     butterflies.push({ group: bg, wings, cx: 14 + b * 3, cz: 8 + (b % 2) * 3, ph: rnd() * Math.PI * 2 });
   }
 
-  // ---- Matahari + cahaya
-  const sun = new THREE.DirectionalLight(0xffd9a0, 2.2);
+  // ---- Matahari + cahaya (anime: matahari emas hangat, hemisphere biru/krem)
+  const sun = new THREE.DirectionalLight(0xffc93c, 2.2);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -95; sun.shadow.camera.right = 95;
   sun.shadow.camera.top = 95; sun.shadow.camera.bottom = -95;
   sun.shadow.camera.far = 300; sun.shadow.bias = -0.0005;
   scene.add(sun); scene.add(sun.target);
-  const hemi = new THREE.HemisphereLight(0xbfd9ff, 0x6a8f4f, 0.9);
+  const hemi = new THREE.HemisphereLight(0x9fd4ff, 0xffe9b8, 0.9);
   scene.add(hemi);
   const amb = new THREE.AmbientLight(0xffe0b3, 0.35);
   scene.add(amb);
-  scene.fog = new THREE.Fog(0xf6c98a, 90, 320);
+  scene.fog = new THREE.Fog(0xd6ecff, 90, 320); // kabut biru muda anime
 
   // Palet waktu (keyframe menit -> warna langit, matahari, kabut, awan).
   // Diinterpolasi linear; malam = cahaya bulan biru redup.
+  // Siang memakai token anime: top #3fa9f5, horizon krem #fff1c4, fog #d6ecff.
   const SKY_STOPS = [
-    { m: 360,  top: 0x8fb8dd, hor: 0xffc98a, fog: 0xf2c184, sun: 0xffb36b, sunI: 1.6, hemiSky: 0xaac4e0, hemiI: 0.7, ambI: 0.3, cloud: 0xffe3c2 },
-    { m: 540,  top: 0x6fb3ef, hor: 0xcfe8f5, fog: 0xd8e8ee, sun: 0xffe3b3, sunI: 2.2, hemiSky: 0xbfd9ff, hemiI: 0.9, ambI: 0.35, cloud: 0xffffff },
-    { m: 720,  top: 0x4f9fe8, hor: 0xbfe3f2, fog: 0xd6e6ea, sun: 0xfff2cc, sunI: 2.4, hemiSky: 0xcfe4ff, hemiI: 1.0, ambI: 0.4, cloud: 0xffffff },
-    { m: 960,  top: 0x6aa8e0, hor: 0xffe0ae, fog: 0xf0d9ac, sun: 0xffd9a0, sunI: 2.2, hemiSky: 0xbfd9ff, hemiI: 0.9, ambI: 0.35, cloud: 0xfff2d8 },
+    { m: 360,  top: 0x7ec8f7, hor: 0xffe9b8, fog: 0xf6e3c2, sun: 0xffb340, sunI: 1.6, hemiSky: 0x9fd4ff, hemiI: 0.7, ambI: 0.3, cloud: 0xffe3c2 },
+    { m: 540,  top: 0x3fa9f5, hor: 0xfff1c4, fog: 0xd6ecff, sun: 0xffc93c, sunI: 2.2, hemiSky: 0x9fd4ff, hemiI: 0.9, ambI: 0.35, cloud: 0xffffff },
+    { m: 720,  top: 0x2f9df2, hor: 0xcfeeff, fog: 0xd6ecff, sun: 0xffd94d, sunI: 2.4, hemiSky: 0xbfe3ff, hemiI: 1.0, ambI: 0.4, cloud: 0xffffff },
+    { m: 960,  top: 0x3fa9f5, hor: 0xffe9b8, fog: 0xdcefff, sun: 0xffc93c, sunI: 2.2, hemiSky: 0x9fd4ff, hemiI: 0.9, ambI: 0.35, cloud: 0xfff2d8 },
     { m: 1080, top: 0x5a6aa8, hor: 0xff9a5c, fog: 0xe8a06a, sun: 0xff8a4d, sunI: 1.2, hemiSky: 0x8a7aa8, hemiI: 0.55, ambI: 0.2, cloud: 0xffd9c2 },
     { m: 1200, top: 0x1c2a4a, hor: 0x3a4a6a, fog: 0x2c3a52, sun: 0x8aa8d8, sunI: 0.35, hemiSky: 0x2a3a5a, hemiI: 0.3, ambI: 0.08, cloud: 0x5a6a8a },
     { m: 1320, top: 0x141f38, hor: 0x2c3a55, fog: 0x232f45, sun: 0x8aa8d8, sunI: 0.3, hemiSky: 0x22304e, hemiI: 0.25, ambI: 0.06, cloud: 0x4a5a78 },
@@ -1118,7 +1215,7 @@ export function buildWorld(scene) {
       grassSway = quality !== 'low';
       // Partikel + kupu-kupu mati total di low; update() mengatur sisanya per waktu.
       if (quality === 'low') {
-        pollen.visible = false; fireflies.visible = false;
+        pollen.visible = false; fireflies.visible = false; petals.visible = false;
         for (const bf of butterflies) bf.group.visible = false;
       } else {
         for (const bf of butterflies) bf.group.visible = true;
@@ -1195,6 +1292,18 @@ export function buildWorld(scene) {
         fp.needsUpdate = true;
         fireflies.material.opacity = 0.45 + 0.4 * Math.sin(elapsed * 2.0);
       }
+      // Kelopak sakura: jatuh pelan + melayang ke samping, siang saja.
+      petals.visible = rich && isDay;
+      if (petals.visible) {
+        const pt = petals.geometry.attributes.position;
+        for (let i = 0; i < pt.count; i++) {
+          let y = pt.getY(i) - dt * (0.35 + (i % 5) * 0.08);
+          if (y < 0.4) y = 6.5;
+          pt.setY(i, y);
+          pt.setX(i, pt.getX(i) + Math.sin(elapsed * 0.8 + i * 1.3) * dt * 0.4);
+        }
+        pt.needsUpdate = true;
+      }
       // Kupu-kupu: siang saja, melayang di sekitar kebun, sayap mengepak.
       const bfOn = rich && minutes >= 420 && minutes < 1020;
       for (const bf of butterflies) {
@@ -1230,6 +1339,18 @@ export function buildWorld(scene) {
       const dusk = THREE.MathUtils.clamp((minutes - 1020) / 120, 0, 1); // 17:00-19:00 senja
       lamp.intensity = night ? 30 : dusk > 0.5 ? 15 : 0;
       winMat.emissiveIntensity = night ? 1.6 : dusk > 0 ? 1.0 : 0.25;
+      // Matahari bergaris anime: disc + sinar mengikuti arah directional
+      // light (di kubah langit, radius 380); malam ganti bulan pucat.
+      sunGroup.visible = !night;
+      moonGroup.visible = night;
+      if (sunGroup.visible) {
+        _v.copy(sun.position).normalize().multiplyScalar(380);
+        sunGroup.position.copy(_v);
+        sunGroup.lookAt(0, 10, 0);
+        sunDiscMat.color.copy(pal.sun);
+        sunRayMat.color.copy(pal.sun);
+        sunRays.rotation.z += dt * 0.12;
+      }
     },
   };
 }

@@ -1,4 +1,9 @@
 // nm-food.js — Lane F: 11 jajanan pasar malam (kolom timur x=92, z -20..20).
+// Restyle visual Lane D (anime overhaul, 25 Nov 2026): semua permukaan
+// MeshToonMaterial + gradientMap 4-step (cel), palet langit/sakura/
+// matahari PRODUCT.md, papan nama display rounded + outline tinta, pipi
+// merona di penjual, SFX khas lembah ("HAP!") + burst kelopak saat makan.
+// Harga, buff, teks, koordinat, perilaku TIDAK berubah.
 // Stan berdiri di atas terrain per stan (terrainHeight — zona Lane P belum
 // ada di branch ini, jadi TIDAK ada asumsi tanah datar). Semua prosedural
 // dari kode (Three.js primitif + tekstur canvas papan nama), tanpa aset luar.
@@ -44,18 +49,84 @@ export const FOODS = [
 
 // Visual per stan (di luar FOODS — bukan bagian kontrak data).
 const VISUALS = {
-  gulali:      { accent: 0xd9382b, shirt: 0xd9382b },
-  rambutNenek: { accent: 0xfffdf2, shirt: 0x7a9cc6 },
-  arumManis:   { accent: 0xe8a0b8, shirt: 0xe8a0b8 },
-  telurGulung: { accent: 0xe8912a, shirt: 0x4a8f3c },
+  gulali:      { accent: 0xff5c8a, shirt: 0xff5c8a },
+  rambutNenek: { accent: 0xfffdf2, shirt: 0x3fa9f5 },
+  arumManis:   { accent: 0xff8fb3, shirt: 0xff8fb3 },
+  telurGulung: { accent: 0xff9f1c, shirt: 0x2fbf4a },
   sosisBakar:  { accent: 0x8a4b2a, shirt: 0x8a4b2a },
-  takoyaki:    { accent: 0xb03a2e, shirt: 0x2e7d32 },
-  martabakMini: { accent: 0xc98a2e, shirt: 0xc98a2e },
-  jagungBakar: { accent: 0xe8c832, shirt: 0xe8c832 },
-  sempolAyam:  { accent: 0xd97b2f, shirt: 0x6e4a26 },
-  jasuke:      { accent: 0xf2d06b, shirt: 0xf2d06b },
-  esKrim:      { accent: 0xf2a0c0, shirt: 0xf2a0c0 },
+  takoyaki:    { accent: 0xff5c8a, shirt: 0x2fbf4a },
+  martabakMini: { accent: 0xff9f1c, shirt: 0xff9f1c },
+  jagungBakar: { accent: 0xffc93c, shirt: 0xffc93c },
+  sempolAyam:  { accent: 0xff9f1c, shirt: 0x6e4a26 },
+  jasuke:      { accent: 0xffc93c, shirt: 0xffc93c },
+  esKrim:      { accent: 0xff8fb3, shirt: 0xff8fb3 },
 };
+
+// ---- Cel/toon anime (Lane D restyle, PRODUCT.md § Dunia 3D) ----
+// Semua permukaan MeshToonMaterial + gradientMap 4-step.
+let _toonGrad = null;
+function toonGrad(THREE) {
+  if (_toonGrad) return _toonGrad;
+  const tex = new THREE.DataTexture(new Uint8Array([90, 150, 210, 255]), 4, 1, THREE.RedFormat);
+  tex.minFilter = THREE.NearestFilter;
+  tex.magFilter = THREE.NearestFilter;
+  tex.needsUpdate = true;
+  _toonGrad = tex;
+  return tex;
+}
+
+// ---- SFX onomatopoeia + burst kelopak (Lane D; PRODUCT.md § Motion) ----
+// Teks SFX khas lembah, partikel = kelopak sakura + daun + bintang — BUKAN
+// asap/shard Sakuga. Hanya di momen makan (satu authored moment per beli).
+// Mati bila prefers-reduced-motion.
+const LH_REDUCED = typeof matchMedia === 'function'
+  && matchMedia('(prefers-reduced-motion: reduce)').matches;
+function lhFxCss() {
+  if (typeof document === 'undefined' || document.getElementById('lh-fx-style-food')) return;
+  const st = document.createElement('style');
+  st.id = 'lh-fx-style-food';
+  st.textContent = '.lh-sfx-nm{position:fixed;left:50%;top:38%;z-index:60;pointer-events:none;font-family:"Arial Rounded MT Bold","Hiragino Maru Gothic ProN","Hiragino Sans","Trebuchet MS",system-ui,sans-serif;font-weight:800;font-style:italic;font-size:clamp(34px,6vw,52px);letter-spacing:.02em;color:#ffc93c;-webkit-text-stroke:2px #1d2b53;text-shadow:4px 4px 0 rgba(29,43,83,.9);transform:translate(-50%,-50%) rotate(-6deg);animation:lh-sfx-nm-pop .9s cubic-bezier(.34,1.56,.64,1) forwards}'
+    + '@keyframes lh-sfx-nm-pop{0%{transform:translate(-50%,-50%) scale(.35) rotate(-12deg);opacity:0}25%{opacity:1;transform:translate(-50%,-50%) scale(1.18) rotate(-3deg)}55%{transform:translate(-50%,-50%) scale(1) rotate(-6deg);opacity:1}100%{transform:translate(-50%,-62%) scale(1.04) rotate(-6deg);opacity:0}}'
+    + '.lh-petal{position:fixed;z-index:60;pointer-events:none;animation:lh-petal-fly .9s ease-out forwards}'
+    + '@keyframes lh-petal-fly{to{transform:translate(var(--dx,0px),var(--dy,-60px)) rotate(var(--rot,180deg)) scale(.55);opacity:0}}'
+    + '#nm-food-modal .primary-btn:active{transform:scale(.93)}'
+    + '@media (prefers-reduced-motion:reduce){.lh-sfx-nm,.lh-petal{animation:none!important;display:none!important}}';
+  document.head.appendChild(st);
+}
+function lhBurst(host) {
+  const cols = ['#ff8fb3', '#ffc93c', '#2fbf4a', '#ff5c8a'];
+  const shapes = ['50% 0 50% 50%', '50%', '0 50% 50% 50%']; // kelopak / bulat / daun
+  for (let i = 0; i < 10; i++) {
+    const p = document.createElement('span');
+    p.className = 'lh-petal';
+    p.setAttribute('aria-hidden', 'true');
+    const a = Math.random() * Math.PI * 2, d = 60 + Math.random() * 90;
+    p.style.setProperty('--dx', `${Math.cos(a) * d}px`);
+    p.style.setProperty('--dy', `${Math.sin(a) * d - 40}px`);
+    p.style.setProperty('--rot', `${(Math.random() * 360) | 0}deg`);
+    p.style.left = '50%';
+    p.style.top = '38%';
+    p.style.background = cols[i % cols.length];
+    p.style.borderRadius = shapes[i % shapes.length];
+    const s = 9 + Math.random() * 7;
+    p.style.width = `${s}px`;
+    p.style.height = `${s * 0.8}px`;
+    host.appendChild(p);
+    setTimeout(() => p.remove(), 950);
+  }
+}
+function lhSfx(text) {
+  if (LH_REDUCED || typeof document === 'undefined') return;
+  lhFxCss();
+  const host = document.getElementById('game-container') || document.body;
+  const el = document.createElement('div');
+  el.className = 'lh-sfx-nm';
+  el.textContent = text;
+  el.setAttribute('aria-hidden', 'true');
+  host.appendChild(el);
+  lhBurst(host);
+  setTimeout(() => el.remove(), 950);
+}
 
 // ---- State buff (transient, module-level: satu game per halaman; TIDAK
 // pernah ditulis ke save, hilang saat reload — sesuai spek).
@@ -127,7 +198,7 @@ export function buildNightMarketFood(scene, THREE, ctx = {}) {
     if (game && game.sfx && typeof game.sfx.play === 'function') game.sfx.play(name);
     else if (ctx.sfx && typeof ctx.sfx.play === 'function') ctx.sfx.play(name);
   };
-  const lam = (color) => new THREE.MeshLambertMaterial({ color });
+  const lam = (color) => new THREE.MeshToonMaterial({ color, gradientMap: toonGrad(THREE) });
   const mesh = (geo, color) => new THREE.Mesh(geo, lam(color));
 
   const group = new THREE.Group();
@@ -151,9 +222,9 @@ export function buildNightMarketFood(scene, THREE, ctx = {}) {
     switch (id) {
       case 'gulali': {
         const s = stick(); s.rotation.z = Math.PI / 2; s.position.y = 0.05; g.add(s);
-        const puff = mesh(new THREE.SphereGeometry(0.22, 10, 8), 0xd9382b);
+        const puff = mesh(new THREE.SphereGeometry(0.22, 10, 8), 0xff5c8a);
         puff.position.set(0.28, 0.12, 0); puff.scale.y = 0.85; g.add(puff);
-        const puff2 = mesh(new THREE.SphereGeometry(0.14, 8, 6), 0xe86a5e);
+        const puff2 = mesh(new THREE.SphereGeometry(0.14, 8, 6), 0xff8fb3);
         puff2.position.set(0.14, 0.24, 0.08); g.add(puff2);
         break;
       }
@@ -168,7 +239,7 @@ export function buildNightMarketFood(scene, THREE, ctx = {}) {
       }
       case 'arumManis': {
         const s = stick(); s.position.y = -0.12; g.add(s);
-        const cone = mesh(new THREE.ConeGeometry(0.2, 0.45, 10), 0xe8a0b8);
+        const cone = mesh(new THREE.ConeGeometry(0.2, 0.45, 10), 0xff8fb3);
         cone.position.y = 0.28; g.add(cone);
         const tip = mesh(new THREE.SphereGeometry(0.09, 8, 6), 0xf2c4d4);
         tip.position.y = 0.5; g.add(tip);
@@ -176,9 +247,9 @@ export function buildNightMarketFood(scene, THREE, ctx = {}) {
       }
       case 'telurGulung': {
         const s = stick(); s.rotation.z = Math.PI / 2; s.position.set(-0.1, 0.05, 0); g.add(s);
-        const roll = mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.5, 10), 0xe8c832);
+        const roll = mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.5, 10), 0xffc93c);
         roll.rotation.z = Math.PI / 2; roll.position.set(0.2, 0.1, 0); g.add(roll);
-        const roll2 = mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.42, 10), 0xd8a018);
+        const roll2 = mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.42, 10), 0xff9f1c);
         roll2.rotation.z = Math.PI / 2; roll2.position.set(0.2, 0.1, 0.14); g.add(roll2);
         break;
       }
@@ -192,7 +263,7 @@ export function buildNightMarketFood(scene, THREE, ctx = {}) {
         // Asap: 3 gumpalan, dianimasikan di update().
         for (let i = 0; i < 3; i++) {
           const p = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5),
-            new THREE.MeshLambertMaterial({ color: 0xdddddd, transparent: true, opacity: 0.6 }));
+            new THREE.MeshToonMaterial({ color: 0xfff6e5, transparent: true, opacity: 0.6, gradientMap: toonGrad(THREE) }));
           p.position.set(-0.15 + i * 0.15, 0.3, 0);
           g.add(p);
           smokes.push({ mesh: p, baseY: 0.3, phase: i / 3 });
@@ -210,7 +281,7 @@ export function buildNightMarketFood(scene, THREE, ctx = {}) {
       }
       case 'martabakMini': {
         for (let i = 0; i < 3; i++) {
-          const d = mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.06, 10), 0xd8a018);
+          const d = mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.06, 10), 0xff9f1c);
           d.position.set(-0.2 + i * 0.2, 0.05 + (i % 2) * 0.02, (i - 1) * 0.06); g.add(d);
           const fill = mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.02, 10), 0x6e4a26);
           fill.position.copy(d.position); fill.position.y += 0.04; g.add(fill);
@@ -219,7 +290,7 @@ export function buildNightMarketFood(scene, THREE, ctx = {}) {
       }
       case 'jagungBakar': {
         const s = stick(); s.rotation.z = Math.PI / 2; s.position.set(-0.15, 0.05, 0); g.add(s);
-        const corn = mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.5, 10), 0xe8c832);
+        const corn = mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.5, 10), 0xffc93c);
         corn.rotation.z = Math.PI / 2; corn.position.set(0.18, 0.1, 0); g.add(corn);
         for (const dz of [-0.06, 0.06]) {
           const stripe = mesh(new THREE.CylinderGeometry(0.102, 0.102, 0.08, 10), 0x8a5a1a);
@@ -232,18 +303,18 @@ export function buildNightMarketFood(scene, THREE, ctx = {}) {
         cup.position.y = 0.12; g.add(cup);
         for (let i = -1; i <= 1; i++) {
           const s = stick(); s.position.set(i * 0.09, 0.32, 0); g.add(s);
-          const bite = mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.22, 8), 0xd97b2f);
+          const bite = mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.22, 8), 0xff9f1c);
           bite.position.set(i * 0.09, 0.32, 0); g.add(bite);
         }
         break;
       }
       case 'jasuke': {
-        const cup = mesh(new THREE.CylinderGeometry(0.19, 0.15, 0.28, 10), 0xf2d06b);
+        const cup = mesh(new THREE.CylinderGeometry(0.19, 0.15, 0.28, 10), 0xffc93c);
         cup.position.y = 0.14; g.add(cup);
         const top = mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.04, 10), 0xf7e08a);
         top.position.y = 0.3; g.add(top);
         for (let i = 0; i < 5; i++) {
-          const k = mesh(new THREE.SphereGeometry(0.04, 6, 5), 0xe8c832);
+          const k = mesh(new THREE.SphereGeometry(0.04, 6, 5), 0xffc93c);
           k.position.set(-0.09 + (i % 3) * 0.09, 0.33, i < 3 ? -0.05 : 0.06); g.add(k);
         }
         break;
@@ -251,9 +322,9 @@ export function buildNightMarketFood(scene, THREE, ctx = {}) {
       case 'esKrim': {
         const cone = mesh(new THREE.ConeGeometry(0.14, 0.38, 10), 0xd8a05a);
         cone.rotation.x = Math.PI; cone.position.y = 0.12; g.add(cone);
-        const scoop = mesh(new THREE.SphereGeometry(0.16, 10, 8), 0xf2a0c0);
+        const scoop = mesh(new THREE.SphereGeometry(0.16, 10, 8), 0xff8fb3);
         scoop.position.y = 0.38; g.add(scoop);
-        const cherry = mesh(new THREE.SphereGeometry(0.045, 6, 5), 0xd9382b);
+        const cherry = mesh(new THREE.SphereGeometry(0.045, 6, 5), 0xff5c8a);
         cherry.position.y = 0.53; g.add(cherry);
         break;
       }
@@ -275,6 +346,11 @@ export function buildNightMarketFood(scene, THREE, ctx = {}) {
     }
     const head = mesh(new THREE.SphereGeometry(0.21, 10, 8), 0xe8b98a);
     head.position.y = 1.32; head.castShadow = true; v.add(head);
+    // Pipi merona anime (blush pink, dua titik di depan wajah).
+    for (const sx of [-0.09, 0.09]) {
+      const blush = mesh(new THREE.SphereGeometry(0.035, 6, 5), 0xff8fb3);
+      blush.position.set(sx, 1.28, 0.19); v.add(blush);
+    }
     const hat = mesh(new THREE.ConeGeometry(0.26, 0.22, 10), 0x8a6b3f);
     hat.position.y = 1.52; v.add(hat);
     v.rotation.y = -Math.PI / 2; // menghadap barat, ke jalan
@@ -287,14 +363,17 @@ export function buildNightMarketFood(scene, THREE, ctx = {}) {
     c.width = 256; c.height = 64;
     const g2 = c.getContext('2d');
     g2.fillStyle = accentHex; g2.fillRect(0, 0, 256, 64);
-    g2.strokeStyle = '#fff8dc'; g2.lineWidth = 4; g2.strokeRect(4, 4, 248, 56);
-    g2.fillStyle = '#fff8dc'; g2.font = 'bold 34px Georgia, serif';
+    g2.strokeStyle = '#1d2b53'; g2.lineWidth = 4; g2.strokeRect(4, 4, 248, 56); // outline tinta
+    g2.font = '800 34px "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "Trebuchet MS", system-ui, sans-serif';
     g2.textAlign = 'center'; g2.textBaseline = 'middle';
+    g2.lineWidth = 5; g2.strokeStyle = '#1d2b53';
+    g2.strokeText(text, 128, 34);
+    g2.fillStyle = '#fff6e5';
     g2.fillText(text, 128, 34);
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
     return new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.45, 0.08),
-      new THREE.MeshLambertMaterial({ map: tex }));
+      new THREE.MeshToonMaterial({ map: tex, gradientMap: toonGrad(THREE) }));
   }
 
   // ---------- Bangun 11 stan ----------
@@ -470,6 +549,7 @@ export function buildNightMarketFood(scene, THREE, ctx = {}) {
   }
   function finishEating(food, game) {
     const lang = langOf(game);
+    lhSfx('HAP!'); // momen perayaan: makanan habis dimakan
     if (food.buff) {
       applyFoodBuff(game, food.id);
       sfx(game, 'eat'); // kunyah (koordinator: case 'eat' baru di audio.js)

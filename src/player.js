@@ -1,8 +1,13 @@
-// player.js — karakter low-poly third-person (Bima / Sari) + gerak fisika kustom.
+// player.js — karakter ANIME third-person (Bima / Sari) + gerak fisika kustom.
+// Overhaul anime 25 Nov 2026 (PRODUCT.md § Karakter): wajah anime (mata
+// besar ekspresif, blush, alis, mulut senyum), rambut anime prosedural
+// (Bima spiky, Sari twin-tail/panjang), outfit toon + outline tegas.
+// Semua material MeshToonMaterial + gradientMap 3-step (cel shading,
+// selaras Lane A). Rig jalan/lompat/idle + slot kustomisasi TIDAK berubah.
 // Gerak: akselerasi + friksi + momentum, maks ~6 m/s; lompat v0 ~8 m/s,
 // gravitasi ~22 m/s^2; menempel terrain; tabrakan lingkaran vs AABB + sungai.
 // Penampilan dibentuk dari state kustomisasi (src/customization.js):
-// model + warna per kategori — semua geometri prosedural Three.js, low-poly.
+// model + warna per kategori — semua geometri prosedural Three.js.
 import * as THREE from 'three';
 import { GRAVITY, JUMP_VELOCITY, MAX_SPEED, ACCEL, FRICTION, clamp, PLAY_BOUND,
          terrainHeight, resolveCircleVsAABBs, isInRiver, isOnBridge, waterDepth, WATER_Y, bridgeHeight } from './physics.js';
@@ -11,41 +16,130 @@ import { defaultCustom, sanitizeCustom, hexOf,
 
 export const PLAYER_RADIUS = 0.55;
 
-function mat(color) { return new THREE.MeshLambertMaterial({ color }); }
+// --- Cel shading: gradientMap 3-step bersama untuk semua material toon
+// karakter (0.59 / 0.80 / 1.0 — bayangan keras khas anime, tanpa blur).
+// DataTexture RGBA (bukan RedFormat: sampling .rgb harus netral, bukan merah).
+const TOON_STEPS = new THREE.DataTexture(
+  new Uint8Array([150, 150, 150, 255, 205, 205, 205, 255, 255, 255, 255, 255]),
+  3, 1, THREE.RGBAFormat);
+TOON_STEPS.minFilter = THREE.NearestFilter;
+TOON_STEPS.magFilter = THREE.NearestFilter;
+TOON_STEPS.generateMipmaps = false;
+TOON_STEPS.needsUpdate = true;
 
-function addHair(g, style, hairC, skinMat) {
+function mat(color, opts = {}) {
+  return new THREE.MeshToonMaterial({ color, gradientMap: TOON_STEPS, ...opts });
+}
+// Material datar (tidak kena cahaya): iris, pupil, highlight, blush, mulut.
+function flatMat(color, opts = {}) {
+  return new THREE.MeshBasicMaterial({ color, ...opts });
+}
+
+// Outline tegas anime (inverted hull, warna --lh-ink #1d2b53): mesh anak
+// BackSide yang diskala sedikit lebih besar, jadi ikut transform induknya.
+const OUTLINE_MAT = new THREE.MeshBasicMaterial({ color: 0x1d2b53, side: THREE.BackSide });
+function addOutline(mesh, s = 1.05) {
+  const o = new THREE.Mesh(mesh.geometry, OUTLINE_MAT);
+  o.scale.setScalar(s);
+  o.castShadow = false;
+  mesh.add(o);
+  return o;
+}
+
+// Warna iris anime per gender (tetap, bukan dari kustomisasi — ciri khas).
+const IRIS_COLOR = { male: 0x2f6fd0, female: 0xe75480 };
+const BLUSH_COLOR = 0xff9fb2;
+const MOUTH_COLOR = 0x9c4a3c;
+
+// --- Rambut anime prosedural ---
+// Semua gaya: topi rambut (cap) + poni anime (3 jambul kerucut pipih di
+// dahi, ujung mengarah ke bawah-depan) + varian gaya. 'long' untuk Sari
+// = twin-tail (dua ekor samping + ikat sakura); untuk Bima = rambut
+// panjang ke belakang. Mengembalikan { tails } — pivot ekor rambut yang
+// digoyang update() (jalan/idle), atau null bila tidak ada ekor.
+function addHair(g, style, hairC, skinMat, gender = 'male') {
   const hm = mat(hairC);
+  const female = gender === 'female';
+  const tails = [];
   const add = (mesh) => { mesh.castShadow = true; g.add(mesh); return mesh; };
+  // Topi rambut (cap) — satu bentuk dasar semua gaya, + outline tegas.
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), hm);
+  cap.position.y = 1.9; cap.rotation.x = -0.35; add(cap); addOutline(cap, 1.04);
+  // Poni anime: 3 jambul pipih di dahi.
+  for (const bx of [-0.17, 0, 0.17]) {
+    const bang = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.24, 5), hm);
+    bang.scale.z = 0.45;
+    bang.position.set(bx, 2.06, 0.3);
+    bang.rotation.x = Math.PI - 0.35; // ujung ke bawah, sedikit ke depan
+    bang.rotation.z = -bx * 0.9;      // jambul luar miring ke samping
+    add(bang);
+  }
+  // Untaian samping depan (temple strands) — semua gaya kecuali spiky
+  // (spiky sudah ramai di atas); jatuh dari pelipis ke pipi.
+  if (style !== 'spiky') {
+    for (const sx of [-1, 1]) {
+      const strand = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.34, 0.07), hm);
+      strand.position.set(sx * 0.31, 1.72, 0.16);
+      strand.rotation.z = sx * 0.12;
+      add(strand);
+    }
+  }
   if (style === 'short') {
-    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), hm);
-    hair.position.y = 1.9; hair.rotation.x = -0.35; add(hair);
+    // Pendek rapi: cap + poni + untaian sudah cukup.
   } else if (style === 'spiky') {
-    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.34, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.5), hm);
-    hair.position.y = 1.92; hair.rotation.x = -0.3; add(hair);
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * Math.PI * 2;
-      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.28, 5), hm);
-      spike.position.set(Math.cos(a) * 0.2, 2.18, Math.sin(a) * 0.2 - 0.05);
-      spike.rotation.z = -Math.cos(a) * 0.5; spike.rotation.x = Math.sin(a) * 0.5;
+    // Bima: spike tinggi di sekeliling + 2 spike depan paling tinggi.
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2;
+      const tall = i % 2 === 0;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.09, tall ? 0.38 : 0.28, 5), hm);
+      spike.position.set(Math.cos(a) * 0.2, 2.2, Math.sin(a) * 0.2 - 0.05);
+      spike.rotation.z = -Math.cos(a) * 0.55; spike.rotation.x = Math.sin(a) * 0.55;
       add(spike);
     }
+    const front = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.4, 5), hm);
+    front.position.set(0, 2.24, 0.22);
+    front.rotation.x = -0.55; // spike depan menjulang ke depan-atas
+    add(front);
   } else if (style === 'long') {
-    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.36, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6), hm);
-    hair.position.y = 1.88; hair.rotation.x = -0.3; add(hair);
-    const back = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.16), hm);
-    back.position.set(0, 1.55, -0.3); add(back);
+    // Panel panjang ke belakang (punggung).
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.85, 0.16), hm);
+    back.position.set(0, 1.45, -0.3); add(back);
+    if (female) {
+      // Sari: twin-tail — ekor samping diikat pita sakura.
+      const tieMat = mat(0xff8fb3);
+      for (const sx of [-1, 1]) {
+        const pivotT = new THREE.Group();
+        pivotT.position.set(sx * 0.34, 1.94, -0.14);
+        pivotT.rotation.z = sx * 0.5; // ekor jatuh miring ke luar
+        pivotT.userData.baseX = 0;
+        pivotT.userData.baseZ = sx * 0.5;
+        const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.13, 0.8, 6), hm);
+        tail.position.y = -0.4; tail.castShadow = true;
+        pivotT.add(tail);
+        const tie = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), tieMat);
+        tie.scale.set(1, 0.7, 1); pivotT.add(tie);
+        g.add(pivotT);
+        tails.push(pivotT);
+      }
+    }
   } else if (style === 'bun') {
-    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), hm);
-    hair.position.y = 1.9; hair.rotation.x = -0.35; add(hair);
     const bun = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 8), hm);
-    bun.position.set(0, 2.08, -0.3); add(bun);
+    bun.position.set(0, 2.08, -0.3); add(bun); addOutline(bun, 1.06);
   } else if (style === 'ponytail') {
-    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), hm);
-    hair.position.y = 1.9; hair.rotation.x = -0.35; add(hair);
+    // Kuncir tinggi di belakang-atas, digoyang update().
+    const pivotT = new THREE.Group();
+    pivotT.position.set(0, 2.06, -0.3);
+    pivotT.rotation.x = 0.5; // ekor mengarah ke belakang-atas
+    pivotT.userData.baseX = 0.5;
+    pivotT.userData.baseZ = 0;
     const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.13, 0.55, 6), hm);
-    tail.position.set(0, 1.75, -0.42); tail.rotation.x = 0.35; add(tail);
+    tail.position.y = 0.28; tail.castShadow = true;
+    pivotT.add(tail);
+    g.add(pivotT);
+    tails.push(pivotT);
   }
   void skinMat;
+  return tails.length ? { tails } : null;
 }
 
 function addHat(g, model, hatC) {
@@ -81,26 +175,91 @@ function addGlasses(g, model, frameC) {
   if (model === 'none') return;
   const fm = mat(frameC);
   const lensMat = model === 'shades'
-    ? new THREE.MeshLambertMaterial({ color: 0x111111 })
-    : new THREE.MeshLambertMaterial({ color: 0xcfe8ff, transparent: true, opacity: 0.55 });
+    ? mat(0x111111)
+    : mat(0xcfe8ff, { transparent: true, opacity: 0.55 });
+  // z digeser maju (0.36) supaya bingkai/lensa duduk DI DEPAN mata anime
+  // (iris di z ~0.35) — bukan menembus bola mata.
   for (const ex of [-0.14, 0.14]) {
     const lens = model === 'round'
       ? new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.025, 6, 12), fm)
       : new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.16, 0.04), fm);
-    lens.position.set(ex, 1.88, 0.32);
+    lens.position.set(ex, 1.88, 0.36);
     g.add(lens);
     if (model !== 'shades') {
       const glass = new THREE.Mesh(new THREE.CircleGeometry(0.1, 12), lensMat);
-      glass.position.set(ex, 1.88, 0.33);
+      glass.position.set(ex, 1.88, 0.365);
       g.add(glass);
     } else {
       const dark = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.14, 0.02), lensMat);
-      dark.position.set(ex, 1.88, 0.33);
+      dark.position.set(ex, 1.88, 0.365);
       g.add(dark);
     }
   }
   const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.03, 0.03), fm);
-  bridge.position.set(0, 1.9, 0.32); g.add(bridge);
+  bridge.position.set(0, 1.9, 0.36); g.add(bridge);
+}
+
+// --- Wajah anime ---
+// Mata besar ekspresif: sklera putih (bola pipih) + iris berwarna datar +
+// pupil + highlight putih + bulu mata atas; alis warna rambut; pipi merona
+// (blush pink transparan, sedikit diputar mengikuti lengkung pipi); mulut
+// senyum (busur torus). Semua menempel di grup `upper` (koordinat dunia
+// karakter: kepala pusat y=1.85, r=0.34 — permukaan wajah di y=1.88 ada
+// di z≈0.34, di y=1.72 di z≈0.31).
+// Mengembalikan grup mata (untuk animasi kedip di Player.update): grup
+// berpusat di (0, 1.88, 0) supaya scale.y mengedip di tempat.
+function addAnimeFace(upper, gender, hairC) {
+  const irisC = IRIS_COLOR[gender] || IRIS_COLOR.male;
+  const scleraMat = mat(0xffffff);
+  const irisMat = flatMat(irisC);
+  const pupilMat = flatMat(0x1d2b53);
+  const shineMat = flatMat(0xffffff);
+  const lashMat = flatMat(0x1d2b53);
+  const eyes = new THREE.Group();
+  eyes.position.set(0, 1.88, 0);
+  upper.add(eyes);
+  for (const sx of [-1, 1]) {
+    const ex = sx * 0.13;
+    // Sklera: bola pipih menonjol sedikit dari permukaan wajah.
+    const sclera = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), scleraMat);
+    sclera.scale.set(1, 1.25, 0.5);
+    sclera.position.set(ex, 0, 0.3);
+    eyes.add(sclera);
+    // Iris + pupil + highlight: lingkaran datar di depan sklera.
+    const iris = new THREE.Mesh(new THREE.CircleGeometry(0.058, 16), irisMat);
+    iris.position.set(ex, -0.01, 0.352); eyes.add(iris);
+    const pupil = new THREE.Mesh(new THREE.CircleGeometry(0.028, 12), pupilMat);
+    pupil.position.set(ex, -0.01, 0.356); eyes.add(pupil);
+    const shine = new THREE.Mesh(new THREE.CircleGeometry(0.018, 10), shineMat);
+    shine.position.set(ex - 0.02, 0.025, 0.359); eyes.add(shine);
+    // Bulu mata atas: garis tebal miring di atas mata.
+    const lash = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.028, 0.02), lashMat);
+    lash.position.set(ex, 0.125, 0.325);
+    lash.rotation.z = -sx * 0.14;
+    eyes.add(lash);
+  }
+  // Alis (warna rambut, di luar grup mata supaya tidak ikut mengedip).
+  const browMat = mat(hairC);
+  for (const sx of [-1, 1]) {
+    const brow = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.032, 0.02), browMat);
+    brow.position.set(sx * 0.13, 2.03, 0.3);
+    brow.rotation.z = -sx * 0.12;
+    upper.add(brow);
+  }
+  // Pipi merona.
+  const blushMat = flatMat(BLUSH_COLOR, { transparent: true, opacity: 0.75 });
+  for (const sx of [-1, 1]) {
+    const blush = new THREE.Mesh(new THREE.CircleGeometry(0.055, 12), blushMat);
+    blush.position.set(sx * 0.215, 1.76, 0.26);
+    blush.rotation.y = sx * 0.55;
+    upper.add(blush);
+  }
+  // Mulut senyum (busur ∪).
+  const mouth = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.011, 6, 12, Math.PI), flatMat(MOUTH_COLOR));
+  mouth.position.set(0, 1.72, 0.315);
+  mouth.rotation.z = Math.PI;
+  upper.add(mouth);
+  return eyes;
 }
 
 // --- Rig berartikulasi ---
@@ -177,8 +336,8 @@ function buildLeg(side, pantsModel, pantsMat, skinMat, shoesModel, shoesMat) {
   return { hip, knee, shoe };
 }
 
-function buildArm(side, shirtModel, shirtMat, skinMat) {
-  const shoulder = pivot(side * 0.48, SHOULDER_Y, 0);
+function buildArm(side, shirtModel, shirtMat, skinMat, armX = 0.48) {
+  const shoulder = pivot(side * armX, SHOULDER_Y, 0);
   shoulder.rotation.z = side * 0.07; // lengan sedikit menjauh dari badan
   shoulder.add(seg(new THREE.CylinderGeometry(0.1, 0.09, UPPER_ARM_LEN, 6), shirtMat, -UPPER_ARM_LEN / 2));
   const elbow = pivot(0, -UPPER_ARM_LEN, 0);
@@ -207,8 +366,11 @@ export function buildCharacter(gender, customInput) {
   // menggerakkan torso utuh (dulu body saja yang naik-turun, kepala diam).
   const upper = new THREE.Group();
   g.add(upper);
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 0.85, 8), shirtMat);
-  body.position.y = 1.05; body.castShadow = true; upper.add(body);
+  // Sari sedikit lebih ramping dari Bima (bahu/siluet); rig TIDAK berubah.
+  const female = gender === 'female';
+  const bodyR = female ? 0.3 : 0.34, bodyR2 = female ? 0.38 : 0.42;
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(bodyR, bodyR2, 0.85, 8), shirtMat);
+  body.position.y = 1.05; body.castShadow = true; upper.add(body); addOutline(body, 1.04);
   if (c.shirtModel === 'overall') {
     // Overall: tali bahu + dada warna celana.
     for (const sx of [-0.16, 0.16]) {
@@ -221,21 +383,36 @@ export function buildCharacter(gender, customInput) {
     const vest = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.6, 0.1), pantsMat);
     vest.position.set(0, 1.1, 0.36); upper.add(vest);
   }
-  // Kepala + rambut + topi + kacamata.
+  // Aksen outfit khas per gender (toon, warna token PRODUCT.md).
+  if (female) {
+    // Pita sakura di leher Sari (dua sayap + simpul).
+    const bowMat = mat(0xff8fb3);
+    for (const sx of [-1, 1]) {
+      const wing = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.17, 4), bowMat);
+      wing.scale.z = 0.4;
+      wing.position.set(sx * 0.1, 1.52, 0.36);
+      wing.rotation.z = sx * Math.PI / 2;
+      upper.add(wing);
+    }
+    const knot = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), bowMat);
+    knot.position.set(0, 1.52, 0.37); upper.add(knot);
+  } else {
+    // Kerah putih Bima.
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.23, 0.09, 8), mat(0xfff6e5));
+    collar.position.y = 1.48; upper.add(collar);
+  }
+  // Kepala + rambut + topi + kacamata + wajah anime.
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 10), skinMat);
-  head.position.y = 1.85; head.castShadow = true; upper.add(head);
-  addHair(upper, c.hairStyle, hairC, skinMat);
+  head.position.y = 1.85; head.castShadow = true; upper.add(head); addOutline(head, 1.04);
+  const hair = addHair(upper, c.hairStyle, hairC, skinMat, gender);
   const hatGroup = addHat(upper, c.hatModel, hatC);
   addGlasses(upper, c.glassesModel, frameC);
-  // Mata.
-  const eyeMat = mat(0x1a1a1a);
-  for (const ex of [-0.13, 0.13]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 6), eyeMat);
-    eye.position.set(ex, 1.88, 0.3); upper.add(eye);
-  }
+  // Wajah anime: mata besar + alis + blush + senyum (ganti mata titik lama).
+  const eyes = addAnimeFace(upper, gender, hairC);
   // Lengan berartikulasi (bahu + siku).
-  const armL = buildArm(-1, c.shirtModel, shirtMat, skinMat);
-  const armR = buildArm(1, c.shirtModel, shirtMat, skinMat);
+  const armX = female ? 0.44 : 0.48;
+  const armL = buildArm(-1, c.shirtModel, shirtMat, skinMat, armX);
+  const armR = buildArm(1, c.shirtModel, shirtMat, skinMat, armX);
   upper.add(armL.shoulder); upper.add(armR.shoulder);
   // Kaki berartikulasi (pinggul + lutut + sepatu menempel betis).
   const shoesMat = mat(shoesC);
@@ -254,6 +431,7 @@ export function buildCharacter(gender, customInput) {
     elbowL: armL.elbow, elbowR: armR.elbow,
     kneeL: legL.knee, kneeR: legR.knee,
     shoeL: legL.shoe, shoeR: legR.shoe,
+    eyes, tails: hair ? hair.tails : null, // anime: kedip + goyang ekor rambut
   };
   g.userData.custom = c;
   return g;
@@ -279,6 +457,8 @@ export class Player {
     this.swimPhase = 0;    // fase tendangan/dayungan
     this.swimAmp = 0;      // amplitudo renang terhaluskan
     this._bobPhase = 0;    // naik-turun mengapung
+    this._blinkNext = 2 + Math.random() * 2; // jeda sampai kedip anime berikutnya (detik)
+    this._blinkT = 0;      // sisa durasi kedip yang sedang berjalan
     this._wasAir = false;
     // Berbaring (urutan tidur): group diputar -90° (kepala ke -Z, ke arah
     // bantal bila menghadap selatan) + diangkat ke atas kasur. Rig/kustomisasi
@@ -473,6 +653,23 @@ export class Player {
     const kneeLxS = 0.5 + 0.35 * Math.max(0, kick), kneeRxS = 0.5 + 0.35 * Math.max(0, kick2);
     const armLxS = -1.1 + 0.8 * kick, armRxS = -1.1 + 0.8 * kick2;
     const u = this.group.userData;
+    // --- Kedip anime: tiap ~2.5–4.5 detik, mata mengecil selama 0.14 detik.
+    this._blinkNext -= dt;
+    if (this._blinkNext <= 0) { this._blinkNext = 2.5 + Math.random() * 2; this._blinkT = 0.14; }
+    if (u.eyes) {
+      if (this._blinkT > 0) {
+        this._blinkT -= dt;
+        const k = Math.min(1, Math.max(0, (0.14 - this._blinkT) / 0.14));
+        u.eyes.scale.y = 1 - Math.sin(k * Math.PI) * 0.9;
+      } else u.eyes.scale.y = 1;
+    }
+    // --- Goyang ekor rambut (twin-tail / ponytail): ikut langkah + napas.
+    if (u.tails) {
+      for (const t of u.tails) {
+        t.rotation.x = t.userData.baseX + Math.sin(ph) * 0.08 * amp + Math.sin(this.breathPhase) * 0.02;
+        t.rotation.z = t.userData.baseZ + Math.cos(ph) * 0.05 * amp;
+      }
+    }
     const L = (w, a) => (1 - ab) * w + ab * a; // blend menapak ↔ udara
     const B = (walk, swim) => walk * (1 - sb) + swim * sb; // blend jalan ↔ renang
     u.legL.rotation.x = B(L(legLxW, -0.35), legLxS);
