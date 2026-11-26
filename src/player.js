@@ -46,8 +46,9 @@ function addOutline(mesh, s = 1.05) {
   return o;
 }
 
-// Warna iris anime per gender (tetap, bukan dari kustomisasi — ciri khas).
-const IRIS_COLOR = { male: 0x2f6fd0, female: 0xe75480 };
+// Warna iris anime per gender — COZY-A: kedua ref bermata cokelat besar,
+// jadi iris cokelat hangat untuk Bima maupun Sari (dulu biru/pink).
+const IRIS_COLOR = { male: 0x7a4a21, female: 0x7a4a21 };
 const BLUSH_COLOR = 0xff9fb2;
 const MOUTH_COLOR = 0x9c4a3c;
 
@@ -55,28 +56,49 @@ const MOUTH_COLOR = 0x9c4a3c;
 // Semua gaya: topi rambut (cap) + poni anime (3 jambul kerucut pipih di
 // dahi, ujung mengarah ke bawah-depan) + varian gaya. 'long' untuk Sari
 // = twin-tail (dua ekor samping + ikat sakura); untuk Bima = rambut
-// panjang ke belakang. Mengembalikan { tails } — pivot ekor rambut yang
-// digoyang update() (jalan/idle), atau null bila tidak ada ekor.
-function addHair(g, style, hairC, skinMat, gender = 'male') {
+// panjang ke belakang. 'braids' (COZY-A) = dua kepang samping + ikat
+// sakura, default Sari mengikuti ref-cewe. Mengembalikan { tails } —
+// pivot ekor rambut yang digoyang update() (jalan/idle), atau null bila
+// tidak ada ekor.
+//
+// COZY-A — perbaikan clip rambut×topi (struktural): addHair menerima
+// hatModel. Topi yang MENUTUP puncak kepala ('straw'/'cap'/'beanie'/
+// 'bandana') memipihkan cap rambut (scale.y 0.55, y 1.86 → puncak
+// ≈2.05, di bawah permukaan atas brim 2.07), memendekkan poni, dan
+// menyembunyikan spike/bun/ponytail tinggi (diganti untaian samping
+// rendah / posisi lebih rendah) — jadi tidak ada lagi geometri rambut
+// yang menembus permukaan atas topi. 'visor' tidak menutup puncak
+// (hanya band + brim depan), jadi rambut dibiarkan penuh. 'none'
+// juga tanpa perubahan. Lihat verifikasi di LANE-A-REPORT.md §4.
+function addHair(g, style, hairC, skinMat, gender = 'male', hatModel = 'none') {
   const hm = mat(hairC);
   const female = gender === 'female';
   const tails = [];
   const add = (mesh) => { mesh.castShadow = true; g.add(mesh); return mesh; };
+  // Topi yang menutup puncak kepala → rambut di bawahnya harus pipih.
+  const coversTop = ['straw', 'cap', 'beanie', 'bandana'].includes(hatModel);
   // Topi rambut (cap) — satu bentuk dasar semua gaya, + outline tegas.
   const cap = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), hm);
-  cap.position.y = 1.9; cap.rotation.x = -0.35; add(cap); addOutline(cap, 1.04);
+  cap.position.y = coversTop ? 1.86 : 1.9;
+  if (coversTop) cap.scale.y = 0.55; // pipih di bawah topi (puncak ≈2.05)
+  cap.rotation.x = -0.35; add(cap); addOutline(cap, 1.04);
   // Poni anime: 3 jambul pipih di dahi.
   for (const bx of [-0.17, 0, 0.17]) {
-    const bang = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.24, 5), hm);
+    const bang = new THREE.Mesh(new THREE.ConeGeometry(0.1, coversTop ? 0.15 : 0.24, 5), hm);
     bang.scale.z = 0.45;
-    bang.position.set(bx, 2.06, 0.3);
+    // Di bawah topi penutup: poni lebih pendek + lebih rendah (puncak
+    // ≈1.98 — di bawah permukaan dome beanie 2.01 di tepi, di bawah
+    // brim straw 2.07 dan bandana 2.08).
+    bang.position.set(bx, coversTop ? 1.91 : 2.06, 0.3);
     bang.rotation.x = Math.PI - 0.35; // ujung ke bawah, sedikit ke depan
     bang.rotation.z = -bx * 0.9;      // jambul luar miring ke samping
     add(bang);
   }
   // Untaian samping depan (temple strands) — semua gaya kecuali spiky
-  // (spiky sudah ramai di atas); jatuh dari pelipis ke pipi.
-  if (style !== 'spiky') {
+  // tanpa topi (spiky sudah ramai di atas); jatuh dari pelipis ke pipi.
+  // Saat topi menutup puncak, spiky pun dapat untaian rendah ini sebagai
+  // pengganti spike yang disembunyikan (tetap di bawah brim, aman).
+  if (style !== 'spiky' || coversTop) {
     for (const sx of [-1, 1]) {
       const strand = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.34, 0.07), hm);
       strand.position.set(sx * 0.31, 1.72, 0.16);
@@ -88,18 +110,23 @@ function addHair(g, style, hairC, skinMat, gender = 'male') {
     // Pendek rapi: cap + poni + untaian sudah cukup.
   } else if (style === 'spiky') {
     // Bima: spike tinggi di sekeliling + 2 spike depan paling tinggi.
-    for (let i = 0; i < 7; i++) {
-      const a = (i / 7) * Math.PI * 2;
-      const tall = i % 2 === 0;
-      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.09, tall ? 0.38 : 0.28, 5), hm);
-      spike.position.set(Math.cos(a) * 0.2, 2.2, Math.sin(a) * 0.2 - 0.05);
-      spike.rotation.z = -Math.cos(a) * 0.55; spike.rotation.x = Math.sin(a) * 0.55;
-      add(spike);
+    // Di bawah topi penutup puncak spike disembunyikan total (ujungnya
+    // sampai 2.44 — menembus dome/brim apa pun); untaian samping di atas
+    // yang menggantikannya.
+    if (!coversTop) {
+      for (let i = 0; i < 7; i++) {
+        const a = (i / 7) * Math.PI * 2;
+        const tall = i % 2 === 0;
+        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.09, tall ? 0.38 : 0.28, 5), hm);
+        spike.position.set(Math.cos(a) * 0.2, 2.2, Math.sin(a) * 0.2 - 0.05);
+        spike.rotation.z = -Math.cos(a) * 0.55; spike.rotation.x = Math.sin(a) * 0.55;
+        add(spike);
+      }
+      const front = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.4, 5), hm);
+      front.position.set(0, 2.24, 0.22);
+      front.rotation.x = -0.55; // spike depan menjulang ke depan-atas
+      add(front);
     }
-    const front = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.4, 5), hm);
-    front.position.set(0, 2.24, 0.22);
-    front.rotation.x = -0.55; // spike depan menjulang ke depan-atas
-    add(front);
   } else if (style === 'long') {
     // Panel panjang ke belakang (punggung).
     const back = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.85, 0.16), hm);
@@ -124,19 +151,64 @@ function addHair(g, style, hairC, skinMat, gender = 'male') {
     }
   } else if (style === 'bun') {
     const bun = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 8), hm);
-    bun.position.set(0, 2.08, -0.3); add(bun); addOutline(bun, 1.06);
+    // Di bawah topi penutup: sanggul turun ke tengkuk + pipih (puncak
+    // 1.81) — sanggul atas (y 2.08) menembus rim belakang beanie.
+    bun.position.set(0, coversTop ? 1.7 : 2.08, -0.3);
+    if (coversTop) bun.scale.y = 0.65;
+    add(bun); addOutline(bun, 1.06);
   } else if (style === 'ponytail') {
     // Kuncir tinggi di belakang-atas, digoyang update().
     const pivotT = new THREE.Group();
-    pivotT.position.set(0, 2.06, -0.3);
-    pivotT.rotation.x = 0.5; // ekor mengarah ke belakang-atas
-    pivotT.userData.baseX = 0.5;
+    // Di bawah topi penutup: pivot turun + ekor miring ke belakang-BAWAH
+    // (rotation.x negatif — positif malah mengarah ke depan, menembus
+    // topi), supaya ekor keluar di BAWAH brim/band, bukan menembusnya.
+    pivotT.position.set(0, coversTop ? 1.8 : 2.06, -0.3);
+    pivotT.rotation.x = coversTop ? -1.35 : 0.5; // ekor mengarah ke belakang-atas
+    pivotT.userData.baseX = coversTop ? -1.35 : 0.5;
     pivotT.userData.baseZ = 0;
     const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.13, 0.55, 6), hm);
     tail.position.y = 0.28; tail.castShadow = true;
     pivotT.add(tail);
     g.add(pivotT);
     tails.push(pivotT);
+  } else if (style === 'braids') {
+    // COZY-A: dua kepang (ref-cewe) — tiap kepang 3 ruas membesar ke
+    // bawah + ujung runcing, diikat pita sakura di pangkalnya. Rambut
+    // belakang dibulatkan (silinder pipih, bukan kotak) supaya dari
+    // belakang terbaca sebagai jatuhan rambut, bukan papan.
+    const back = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 0.5, 6), hm);
+    back.scale.z = 0.45;
+    back.position.set(0, 1.55, -0.28); add(back);
+    const tieMat = mat(0xff8fb3);
+    for (const sx of [-1, 1]) {
+      const pivotT = new THREE.Group();
+      pivotT.position.set(sx * 0.36, 1.92, -0.05);
+      pivotT.rotation.z = sx * 0.35; // kepang jatuh miring ke luar
+      pivotT.userData.baseX = 0;
+      pivotT.userData.baseZ = sx * 0.35;
+      // Inti kepang (silinder tipis) + ruas bola yang bertumpuk rapat —
+      // tanpa inti, ruasnya terbaca seperti manik-manik berderet.
+      const core = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.52, 6), hm);
+      core.position.y = -0.28; core.castShadow = true;
+      pivotT.add(core);
+      // Ruas kepang: bola-bola berselang-seling (anyaman) + ujung kerucut.
+      const segR = [0.095, 0.085, 0.075];
+      const segY = [-0.09, -0.24, -0.38];
+      for (let i = 0; i < 3; i++) {
+        const segB = new THREE.Mesh(new THREE.SphereGeometry(segR[i], 8, 6), hm);
+        segB.position.set(i % 2 === 0 ? 0.02 : -0.02, segY[i], 0);
+        segB.scale.set(1, 0.85, 0.9);
+        segB.castShadow = true;
+        pivotT.add(segB);
+      }
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.14, 6), hm);
+      tip.position.y = -0.55; tip.rotation.x = Math.PI;
+      pivotT.add(tip);
+      const tie = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), tieMat);
+      tie.scale.set(1, 0.7, 1); pivotT.add(tie);
+      g.add(pivotT);
+      tails.push(pivotT);
+    }
   }
   void skinMat;
   return tails.length ? { tails } : null;
@@ -166,6 +238,17 @@ function addHat(g, model, hatC) {
     band.position.y = 2.0; hg.add(band);
     const knot = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 6), hm);
     knot.position.set(0, 2.02, -0.36); hg.add(knot);
+  } else if (model === 'visor') {
+    // COZY-A: visor putih ref-cewe — band melingkar + brim depan, TANPA
+    // dome: puncak rambut tetap terlihat, jadi tidak ada yang bisa clip.
+    // Band di y 2.10 (bukan 2.02): tepi bawahnya 2.04, di atas puncak
+    // mata (2.005) — visor tidak boleh menutup mata seperti masker tidur.
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.37, 0.38, 0.12, 10), hm);
+    band.position.y = 2.1; hg.add(band);
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.3), hm);
+    brim.position.set(0, 2.08, 0.42); hg.add(brim);
+    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 0.05), hm);
+    strap.position.set(0, 2.1, -0.37); hg.add(strap);
   }
   g.add(hg);
   return hg;
@@ -208,6 +291,11 @@ function addGlasses(g, model, frameC) {
 // di z≈0.34, di y=1.72 di z≈0.31).
 // Mengembalikan grup mata (untuk animasi kedip di Player.update): grup
 // berpusat di (0, 1.88, 0) supaya scale.y mengedip di tempat.
+// COZY-A: mengembalikan objek wajah lengkap { eyes, mouths, brows,
+// blushMat, eyeScale } — Player.update() mengganti ekspresi lewat
+// applyFaceExpression() (lihat di bawah): neutral / happy / focused /
+// tired. eyeScale dikali faktor kedip di update(), jadi ekspresi dan
+// kedip tidak saling menimpa.
 function addAnimeFace(upper, gender, hairC) {
   const irisC = IRIS_COLOR[gender] || IRIS_COLOR.male;
   const scleraMat = mat(0xffffff);
@@ -240,11 +328,14 @@ function addAnimeFace(upper, gender, hairC) {
   }
   // Alis (warna rambut, di luar grup mata supaya tidak ikut mengedip).
   const browMat = mat(hairC);
+  const brows = [];
   for (const sx of [-1, 1]) {
     const brow = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.032, 0.02), browMat);
     brow.position.set(sx * 0.13, 2.03, 0.3);
     brow.rotation.z = -sx * 0.12;
+    brow.userData.baseRotZ = -sx * 0.12;
     upper.add(brow);
+    brows.push(brow);
   }
   // Pipi merona.
   const blushMat = flatMat(BLUSH_COLOR, { transparent: true, opacity: 0.75 });
@@ -254,12 +345,57 @@ function addAnimeFace(upper, gender, hairC) {
     blush.rotation.y = sx * 0.55;
     upper.add(blush);
   }
-  // Mulut senyum (busur ∪).
-  const mouth = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.011, 6, 12, Math.PI), flatMat(MOUTH_COLOR));
-  mouth.position.set(0, 1.72, 0.315);
-  mouth.rotation.z = Math.PI;
-  upper.add(mouth);
-  return eyes;
+  // Tiga varian mulut (hanya satu yang terlihat): senyum (busur ∪),
+  // terbuka (mulut senang lebar), datar (fokus/lelah).
+  const mouthSmile = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.011, 6, 12, Math.PI), flatMat(MOUTH_COLOR));
+  mouthSmile.position.set(0, 1.72, 0.315);
+  mouthSmile.rotation.z = Math.PI;
+  upper.add(mouthSmile);
+  const mouthOpen = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), flatMat(MOUTH_COLOR));
+  mouthOpen.scale.set(1, 0.75, 0.5);
+  mouthOpen.position.set(0, 1.7, 0.315);
+  mouthOpen.visible = false;
+  upper.add(mouthOpen);
+  const mouthFlat = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.014, 0.02), flatMat(MOUTH_COLOR));
+  mouthFlat.position.set(0, 1.72, 0.315);
+  mouthFlat.visible = false;
+  upper.add(mouthFlat);
+  return {
+    eyes,
+    mouths: { smile: mouthSmile, open: mouthOpen, flat: mouthFlat },
+    brows,
+    blushMat,
+    eyeScale: 1, // dikali faktor kedip di Player.update()
+  };
+}
+
+// Ekspresi wajah per aktivitas (COZY-A). 'happy' = mata menutup senang
+// (eyeScale kecil) + mulut terbuka; 'focused' = alis menukik + mulut
+// datar; 'tired' = mata setengah + mulut datar + blush lebih kuat;
+// 'neutral' = bawaan (senyum, mata penuh). Dipanggil Player.update()
+// tiap kali ekspresi berubah; kedip tetap jalan via eyeScale.
+function applyFaceExpression(face, expr) {
+  if (!face) return;
+  const show = (key) => {
+    for (const [k, m] of Object.entries(face.mouths)) m.visible = (k === key);
+  };
+  if (expr === 'happy') {
+    face.eyeScale = 0.35; show('open');
+    face.brows.forEach((b) => { b.rotation.z = b.userData.baseRotZ; });
+    face.blushMat.opacity = 0.95;
+  } else if (expr === 'focused') {
+    face.eyeScale = 1; show('flat');
+    face.brows.forEach((b, i) => { b.rotation.z = (i === 0 ? -1 : 1) * 0.38; });
+    face.blushMat.opacity = 0.6;
+  } else if (expr === 'tired') {
+    face.eyeScale = 0.55; show('flat');
+    face.brows.forEach((b) => { b.rotation.z = 0; });
+    face.blushMat.opacity = 0.85;
+  } else { // neutral
+    face.eyeScale = 1; show('smile');
+    face.brows.forEach((b) => { b.rotation.z = b.userData.baseRotZ; });
+    face.blushMat.opacity = 0.75;
+  }
 }
 
 // --- Rig berartikulasi ---
@@ -321,9 +457,11 @@ function addShoe(knee, model, shoesMat) {
 function buildLeg(side, pantsModel, pantsMat, skinMat, shoesModel, shoesMat) {
   const hip = pivot(side * 0.18, HIP_Y, 0);
   if (pantsModel === 'shorts') {
-    // Celana pendek: paha atas warna celana, sisanya kulit sampai lutut.
-    hip.add(seg(new THREE.CylinderGeometry(0.125, 0.12, 0.2, 6), pantsMat, -0.1));
-    hip.add(seg(new THREE.CylinderGeometry(0.11, 0.105, 0.12, 6), skinMat, -0.26));
+    // Celana pendek (ref-cowo: Bima bercelana biru sebetis paha):
+    // biru menutupi SELURUH paha sampai lutut — segmen biru pendek
+    // sebelumnya tersembunyi di balik hem baju dari kamera atas, jadi
+    // celananya tidak terbaca. Betis di bawah lutut tetap kulit.
+    hip.add(seg(new THREE.CylinderGeometry(0.125, 0.12, THIGH_LEN, 6), pantsMat, -THIGH_LEN / 2));
   } else {
     hip.add(seg(new THREE.CylinderGeometry(0.12, 0.11, THIGH_LEN, 6), pantsMat, -THIGH_LEN / 2));
   }
@@ -336,7 +474,7 @@ function buildLeg(side, pantsModel, pantsMat, skinMat, shoesModel, shoesMat) {
   return { hip, knee, shoe };
 }
 
-function buildArm(side, shirtModel, shirtMat, skinMat, armX = 0.48) {
+function buildArm(side, shirtModel, shirtMat, skinMat, armX = 0.48, handMat = null) {
   const shoulder = pivot(side * armX, SHOULDER_Y, 0);
   shoulder.rotation.z = side * 0.07; // lengan sedikit menjauh dari badan
   shoulder.add(seg(new THREE.CylinderGeometry(0.1, 0.09, UPPER_ARM_LEN, 6), shirtMat, -UPPER_ARM_LEN / 2));
@@ -345,7 +483,9 @@ function buildArm(side, shirtModel, shirtMat, skinMat, armX = 0.48) {
   // Lengan panjang = baju sampai tangan; kaos/overall/vest = lengan bawah kulit.
   const foreMat = shirtModel === 'long' ? shirtMat : skinMat;
   elbow.add(seg(new THREE.CylinderGeometry(0.09, 0.08, FOREARM_LEN, 6), foreMat, -FOREARM_LEN / 2));
-  elbow.add(seg(new THREE.SphereGeometry(0.09, 8, 6), skinMat, -FOREARM_LEN - 0.02));
+  // Tangan: sarung tangan bila handMat diberikan (COZY-A: Bima bersarung
+  // tangan merah seperti ref-cowo), kulit bila tidak.
+  elbow.add(seg(new THREE.SphereGeometry(0.09, 8, 6), handMat || skinMat, -FOREARM_LEN - 0.02));
   return { shoulder, elbow };
 }
 
@@ -379,41 +519,68 @@ export function buildCharacter(gender, customInput) {
     }
     const bib = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.35, 0.06), pantsMat);
     bib.position.set(0, 1.2, 0.36); upper.add(bib);
+    // COZY-A: saku depan ala ref-cewe (kotak cokelat + cangkir kopi putih
+    // kecil di atasnya) — detail denim overall Sari.
+    const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.17, 0.03), mat(0x6e4a26));
+    pocket.position.set(-0.09, 1.06, 0.4); upper.add(pocket);
+    const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.024, 0.05, 8), mat(0xfff6e5));
+    cup.position.set(-0.09, 1.16, 0.415); upper.add(cup);
   } else if (c.shirtModel === 'vest') {
     const vest = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.6, 0.1), pantsMat);
     vest.position.set(0, 1.1, 0.36); upper.add(vest);
   }
   // Aksen outfit khas per gender (toon, warna token PRODUCT.md).
   if (female) {
-    // Pita sakura di leher Sari (dua sayap + simpul).
-    const bowMat = mat(0xff8fb3);
-    for (const sx of [-1, 1]) {
-      const wing = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.17, 4), bowMat);
-      wing.scale.z = 0.4;
-      wing.position.set(sx * 0.1, 1.52, 0.36);
-      wing.rotation.z = sx * Math.PI / 2;
-      upper.add(wing);
-    }
-    const knot = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), bowMat);
-    knot.position.set(0, 1.52, 0.37); upper.add(knot);
-  } else {
-    // Kerah putih Bima.
+    // COZY-A: kerah putih kemeja Sari (ref-cewe) — pita sakura lama
+    // diganti, supaya siluetnya sama dengan referensi.
     const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.23, 0.09, 8), mat(0xfff6e5));
     collar.position.y = 1.48; upper.add(collar);
+  } else {
+    // COZY-A: syal merah Bima (ref-cowo) — cincin leher + simpul + ekor
+    // menjuntai di dada, menggantikan kerah putih lama.
+    const scarfMat = mat(0xb03a2e);
+    const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.055, 8, 12), scarfMat);
+    scarf.position.y = 1.48; scarf.rotation.x = Math.PI / 2; upper.add(scarf);
+    const knot = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), scarfMat);
+    knot.position.set(0, 1.44, 0.36); upper.add(knot);
+    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.24, 0.03), scarfMat);
+    tail.position.set(0.07, 1.3, 0.36); tail.rotation.z = 0.15; upper.add(tail);
   }
   // Kepala + rambut + topi + kacamata + wajah anime.
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 10), skinMat);
   head.position.y = 1.85; head.castShadow = true; upper.add(head); addOutline(head, 1.04);
-  const hair = addHair(upper, c.hairStyle, hairC, skinMat, gender);
+  // COZY-A: hatModel diteruskan ke addHair — perbaikan clip struktural.
+  const hair = addHair(upper, c.hairStyle, hairC, skinMat, gender, c.hatModel);
   const hatGroup = addHat(upper, c.hatModel, hatC);
   addGlasses(upper, c.glassesModel, frameC);
   // Wajah anime: mata besar + alis + blush + senyum (ganti mata titik lama).
-  const eyes = addAnimeFace(upper, gender, hairC);
-  // Lengan berartikulasi (bahu + siku).
+  const face = addAnimeFace(upper, gender, hairC);
+  const eyes = face.eyes;
+  // Lengan berartikulasi (bahu + siku). Bima bersarung tangan merah
+  // (ref-cowo); Sari bertangan kulit.
   const armX = female ? 0.44 : 0.48;
-  const armL = buildArm(-1, c.shirtModel, shirtMat, skinMat, armX);
-  const armR = buildArm(1, c.shirtModel, shirtMat, skinMat, armX);
+  const gloveMat = female ? null : mat(0xb03a2e);
+  const armL = buildArm(-1, c.shirtModel, shirtMat, skinMat, armX, gloveMat);
+  const armR = buildArm(1, c.shirtModel, shirtMat, skinMat, armX, gloveMat);
   upper.add(armL.shoulder); upper.add(armR.shoulder);
+  // COZY-A: garpu tanah (pitchfork) di tangan kanan Bima, menempel di
+  // pivot siku kanan supaya ikut ayun lengan. Gagang kayu + 3 gigi logam.
+  let tool = null;
+  if (!female) {
+    const fork = new THREE.Group();
+    const woodMat = mat(0x8a6b3f);
+    const steelMat = mat(0x9aa3ad);
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.5, 6), woodMat);
+    handle.position.set(0, -0.1, 0.02); handle.castShadow = true; fork.add(handle);
+    const cross = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.04, 0.04), steelMat);
+    cross.position.set(0, 0.62, 0.02); fork.add(cross);
+    for (const px of [-0.09, 0, 0.09]) {
+      const prong = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.02, px === 0 ? 0.32 : 0.28, 5), steelMat);
+      prong.position.set(px, 0.78, 0.02); fork.add(prong);
+    }
+    armR.elbow.add(fork);
+    tool = fork;
+  }
   // Kaki berartikulasi (pinggul + lutut + sepatu menempel betis).
   const shoesMat = mat(shoesC);
   const legL = buildLeg(-1, c.pantsModel, pantsMat, skinMat, c.shoesModel, shoesMat);
@@ -431,7 +598,8 @@ export function buildCharacter(gender, customInput) {
     elbowL: armL.elbow, elbowR: armR.elbow,
     kneeL: legL.knee, kneeR: legR.knee,
     shoeL: legL.shoe, shoeR: legR.shoe,
-    eyes, tails: hair ? hair.tails : null, // anime: kedip + goyang ekor rambut
+    eyes, face, tool, // anime: kedip + ekspresi + garpu tanah Bima
+    tails: hair ? hair.tails : null, // anime: kedip + goyang ekor rambut
   };
   g.userData.custom = c;
   return g;
@@ -460,6 +628,17 @@ export class Player {
     this._blinkNext = 2 + Math.random() * 2; // jeda sampai kedip anime berikutnya (detik)
     this._blinkT = 0;      // sisa durasi kedip yang sedang berjalan
     this._wasAir = false;
+    // COZY-A — pose aksi + ekspresi. _action: null | 'plant' | 'water' |
+    // 'harvest' | 'greet' | 'pet'; durasi detik, pose di-blend dengan
+    // amplop sin(π·progress) di update(). Ekspresi mengikuti aksi yang
+    // sedang jalan (lihat update): plant/water → focused, harvest/greet/
+    // pet → happy, berenang / baru mendarat → tired, sisanya neutral.
+    this._action = null;
+    this._actionT = 0;
+    this._actionDur = 1;
+    this._expr = 'neutral';
+    this._exprOverride = null;
+    this._exprOverrideT = 0;
     // Berbaring (urutan tidur): group diputar -90° (kepala ke -Z, ke arah
     // bantal bila menghadap selatan) + diangkat ke atas kasur. Rig/kustomisasi
     // TIDAK diubah — hanya pose grup + lift yang di-blend halus.
@@ -506,6 +685,23 @@ export class Player {
     if (this.yOff <= 0.01) { this.vy = JUMP_VELOCITY * (this.buffs?.jumpMul || 1); this.yOff = 0.01; return true; }
     return false;
   }
+  // --- COZY-A: pose aksi + interaksi (dipanggil lane gameplay/NPC) ---
+  // Semua pose hanya mengubah _action; update() yang menganimasikannya
+  // (blend masuk-keluar halus) — tidak membekukan gerak/fisika.
+  _startAction(name, dur) {
+    this._action = name; this._actionDur = dur; this._actionT = dur;
+  }
+  plant() { this._startAction('plant', 1.2); }    // menanam: berlutut + raih
+  water() { this._startAction('water', 1.4); }    // menyiram: condong + tuang
+  harvest() { this._startAction('harvest', 1.0); } // memanen: raih + angkat
+  greet() { this._startAction('greet', 1.6); }    // sapa NPC: lambaian tangan
+  pet() { this._startAction('pet', 1.2); }        // elus hewan: raih ke bawah
+  // Paksa satu ekspresi selama `dur` detik (untuk lane NPC/dialog).
+  // Setelah habis, ekspresi kembali mengikuti aksi/keadaan.
+  setExpression(expr, dur = 2) {
+    if (!['neutral', 'happy', 'focused', 'tired'].includes(expr)) return;
+    this._exprOverride = expr; this._exprOverrideT = dur;
+  }
   // Pose berbaring untuk urutan tidur. Menghadap selatan (facing 0) supaya
   // kepala jatuh ke utara — ke arah bantal. Dipanggil main.js saat fase
   // 'lying'; update() yang menganimasikan transisinya via _lieBlend.
@@ -541,6 +737,24 @@ export class Player {
     }
     // Bangun dari berbaring: blend kembali ke 0 (diterapkan di akhir update).
     this._lieBlend += (0 - this._lieBlend) * Math.min(1, dt * 6);
+    // COZY-A: hitung mundur pose aksi + ekspresi wajah per aktivitas.
+    // Prioritas: override manual (lane NPC) > aksi yang sedang jalan >
+    // lelah (baru mendarat / berenang) > netral.
+    if (this._actionT > 0) {
+      this._actionT -= dt;
+      if (this._actionT <= 0) { this._action = null; this._actionT = 0; }
+    }
+    if (this._exprOverrideT > 0) this._exprOverrideT -= dt;
+    else this._exprOverride = null;
+    let expr = 'neutral';
+    if (this._exprOverride) expr = this._exprOverride;
+    else if (this._action === 'plant' || this._action === 'water') expr = 'focused';
+    else if (this._action === 'harvest' || this._action === 'greet' || this._action === 'pet') expr = 'happy';
+    else if (this.landDip > 0.5 || this.swimming) expr = 'tired';
+    if (expr !== this._expr) {
+      this._expr = expr;
+      applyFaceExpression(this.group.userData.face, expr);
+    }
     // Kamera menghadap -Z dunia (dari belakang karakter, sedikit dari atas):
     // maju = -Z, kanan = +X.
     const mx = move.x, mz = -move.y;
@@ -657,11 +871,14 @@ export class Player {
     this._blinkNext -= dt;
     if (this._blinkNext <= 0) { this._blinkNext = 2.5 + Math.random() * 2; this._blinkT = 0.14; }
     if (u.eyes) {
+      // Kedip dikali eyeScale ekspresi (mata 'happy' yang sudah setengah
+      // menutup tetap mengedip tanpa membuka penuh).
+      const eyeScale = u.face ? u.face.eyeScale : 1;
       if (this._blinkT > 0) {
         this._blinkT -= dt;
         const k = Math.min(1, Math.max(0, (0.14 - this._blinkT) / 0.14));
-        u.eyes.scale.y = 1 - Math.sin(k * Math.PI) * 0.9;
-      } else u.eyes.scale.y = 1;
+        u.eyes.scale.y = eyeScale * (1 - Math.sin(k * Math.PI) * 0.9);
+      } else u.eyes.scale.y = eyeScale;
     }
     // --- Goyang ekor rambut (twin-tail / ponytail): ikut langkah + napas.
     if (u.tails) {
@@ -683,6 +900,43 @@ export class Player {
     u.upper.position.y = (1 - sb) * (1 - ab) * (bobW + 0.012 * breath * (1 - amp) - 0.05 * this.landDip);
     u.upper.rotation.x = B(L(leanW, 0.06), 0.5);
     u.upper.rotation.z = (1 - ab) * swayW * (1 - sb);
+    // COZY-A: lompat — lengan membuka ke samping saat melayang (polish
+    // pose udara yang sudah ada; di tanah kembali ke 0.07 bawaan).
+    u.armL.rotation.z = -0.07 - ab * 0.35;
+    u.armR.rotation.z = 0.07 + ab * 0.35;
+    // COZY-A: pose aksi — target pose per aksi di-blend dengan amplop
+    // sin(π·progress): 0 di awal/akhir, 1 di tengah gerakan.
+    if (this._action) {
+      const prog = 1 - this._actionT / this._actionDur;
+      const env = Math.sin(Math.min(1, Math.max(0, prog)) * Math.PI) * 0.85;
+      const mix = (o, p, t) => { o[p] += (t - o[p]) * env; };
+      if (this._action === 'plant') {
+        mix(u.legL.rotation, 'x', -0.95); mix(u.legR.rotation, 'x', 0.45);
+        mix(u.kneeL.rotation, 'x', 1.25); mix(u.kneeR.rotation, 'x', 0.7);
+        mix(u.upper.rotation, 'x', 0.55); mix(u.upper.position, 'y', -0.12);
+        mix(u.armL.rotation, 'x', -0.95); mix(u.armR.rotation, 'x', -0.95);
+        mix(u.elbowL.rotation, 'x', -0.5); mix(u.elbowR.rotation, 'x', -0.5);
+      } else if (this._action === 'water') {
+        mix(u.upper.rotation, 'x', 0.35);
+        mix(u.armR.rotation, 'x', -1.25); mix(u.elbowR.rotation, 'x', -1.0);
+        mix(u.armL.rotation, 'x', -0.35); mix(u.elbowL.rotation, 'x', -0.3);
+        mix(u.legL.rotation, 'x', -0.15); mix(u.legR.rotation, 'x', 0.15);
+        mix(u.kneeL.rotation, 'x', 0.25); mix(u.kneeR.rotation, 'x', 0.25);
+      } else if (this._action === 'harvest') {
+        mix(u.armL.rotation, 'x', -1.15); mix(u.armR.rotation, 'x', -1.15);
+        mix(u.elbowL.rotation, 'x', -0.25); mix(u.elbowR.rotation, 'x', -0.25);
+        mix(u.upper.rotation, 'x', 0.12);
+        mix(u.kneeL.rotation, 'x', 0.3); mix(u.kneeR.rotation, 'x', 0.3);
+      } else if (this._action === 'greet') {
+        mix(u.armR.rotation, 'x', -2.5); mix(u.elbowR.rotation, 'x', -0.35);
+        u.armR.rotation.z = 0.07 + (0.55 + Math.sin(this._actionT * 12) * 0.25) * env;
+      } else if (this._action === 'pet') {
+        mix(u.upper.rotation, 'x', 0.42);
+        mix(u.armR.rotation, 'x', -1.05); mix(u.elbowR.rotation, 'x', -0.25);
+        mix(u.armL.rotation, 'x', -0.2);
+        mix(u.kneeL.rotation, 'x', 0.2); mix(u.kneeR.rotation, 'x', 0.2);
+      }
+    }
     this.group.position.set(this.x, this.y + this._lieLift * this._lieBlend, this.z);
     // Sisa transisi bangun: grup kembali tegak seiring _lieBlend → 0.
     this.group.rotation.x = -Math.PI / 2 * this._lieBlend;

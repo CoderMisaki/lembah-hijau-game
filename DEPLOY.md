@@ -1,19 +1,142 @@
-# DEPLOY — Lembah Hijau (Cloudflare Pages + Workers + D1)
+# DEPLOY — Lembah Hijau (GitHub Pages + Supabase)
 
-Status saat ini: **BELUM TER-DEPLOY.** Wrangler 4.166.0 ada di VM tapi
+Status saat ini: **LIVE.** Game statis di GitHub Pages (branch
+**master**, `.nojekyll`) + backend Supabase (Edge Function
+`lembah-hijau-api`, project `lembah-hijau`
+`ajsliyqjucgdtbimvdtd`). Client (`src/cloud.js`) + `index.html` sudah
+menunjuk ke Edge Function, dan backend menjawab `GET /api/health`
+dengan `{"ok":true}` (terverifikasi live 26 Nov 2026). Yang sudah
+**teruji**: game di headless Chrome (29/29 landscape, 25/25 portrait)
+dan harness API Supabase 29 skenario (`supabase/worker-test.mjs`).
+
+> Catatan: backend lama Cloudflare Workers/D1 sudah TIDAK dipakai.
+> Langkah-langkah lamanya TIDAK dihapus — dipindah ke bagian
+> **HISTORIS** di bawah sebagai referensi/rollback. Jangan deploy
+> dari bagian itu. Detail legacy: `worker/DEPRECATED.md`.
+
+## 0. Gambaran deploy saat ini
+
+| Bagian | Di mana | Cara deploy |
+|---|---|---|
+| Game statis (HTML/CSS/JS) | GitHub Pages — https://codermisaki.github.io/lembah-hijau-game/ | Push ke branch `master` (repo `CoderMisaki/lembah-hijau-game`); Pages deploy otomatis, tunggu ±1 menit |
+| Backend API + auth + save | Supabase Edge Function `lembah-hijau-api` — https://ajsliyqjucgdtbimvdtd.supabase.co/functions/v1/lembah-hijau-api | Dashboard Supabase / CLI, lihat `supabase/DEPLOY-SUPABASE.md` |
+| Database | Postgres Supabase (5 tabel: `users`, `sessions`, `saves`, `login_attempts`, `rate_limits`) | SQL Editor, lihat `supabase/DEPLOY-SUPABASE.md` langkah 1 |
+
+## 1. Deploy game statis (GitHub Pages)
+
+```bash
+cd ~/workspace/lembah-hijau-game
+git push origin master
+# GitHub Pages mengambil branch master (terverifikasi via gh api:
+# pages source.branch=master, default_branch=master).
+# Tunggu ±1 menit, lalu buka https://codermisaki.github.io/lembah-hijau-game/
+```
+
+Tidak ada build step, tidak ada CI. `.nojekyll` di root wajib ada agar
+Pages menyajikan file apa adanya (termasuk path berawalan `_`).
+
+## 2. Deploy / redeploy backend (Supabase)
+
+Langkah lengkap ada di [`supabase/DEPLOY-SUPABASE.md`](supabase/DEPLOY-SUPABASE.md)
+— ringkasnya:
+
+1. **Tabel:** paste `supabase/migrations/001_lembah_hijau.sql` di SQL
+   Editor dashboard, Run. Harus ada 5 tabel di schema `public`.
+   RLS aktif di semua tabel TANPA policy (disengaja — hanya Edge
+   Function dengan `service_role` yang bisa akses).
+2. **Edge Function:** buat fungsi **`lembah-hijau-api`**, matikan
+   **Verify JWT** (API memakai token sesi sendiri, bukan JWT Supabase
+   Auth), paste `supabase/functions/lembah-hijau-api/index.ts`, Deploy.
+3. **Secret CORS:** `ALLOWED_ORIGINS` =
+   `https://codermisaki.github.io,https://lembah-hijau.pages.dev`
+   (tanpa spasi, tanpa trailing slash), lalu redeploy bila diminta.
+   `SUPABASE_URL` dan `SUPABASE_SERVICE_ROLE_KEY` disediakan otomatis
+   oleh runtime — jangan diset manual.
+4. **Sambungkan game:** `index.html` sudah berisi 2 meta ini (jangan
+   dihapus):
+   ```html
+   <meta name="lh-api-base" content="https://ajsliyqjucgdtbimvdtd.supabase.co/functions/v1/lembah-hijau-api">
+   <meta name="lh-supabase-anon-key" content="<ANON_KEY dari keys file>">
+   ```
+   Anon key adalah publishable key (aman tampil di HTML publik).
+   Jangan pernah isi service_role key ke HTML.
+
+## 3. Verifikasi produksi (wajib sebelum diumumkan)
+
+```bash
+cd ~/workspace/lembah-hijau-game/supabase
+KEY=$(grep '^ANON_KEY=' ~/.config/supabase-lembah-hijau/keys | cut -d= -f2-)
+URL=https://ajsliyqjucgdtbimvdtd.supabase.co/functions/v1/lembah-hijau-api
+
+curl -s $URL/api/health -H "apikey: $KEY"
+# -> {"ok":true,"service":"lembah-hijau","time":...}
+
+# Harness 29 skenario (register -> login -> save -> load -> lockout 5x -> logout):
+node worker-test.mjs
+# -> harus PASS=29 FAIL=0. Username test ber-suffix timestamp, aman
+#    dijalankan ulang (tidak bentrok dengan akun asli).
+```
+
+Lalu di browser: buka URL Pages → Buat Akun → main sebentar → tekan
+💾 Simpan → muat ulang halaman → login lagi → progress + kustomisasi
+harus kembali utuh.
+
+## 4. Kalau deploy gagal
+
+- `401 {"message":"Invalid API key"}` / 401 tanpa body JSON → header
+  `apikey` tidak terkirim atau salah. Cek meta anon key / `getAnonKey()`.
+- `401` dari gateway pada SEMUA endpoint termasuk health → **verify_jwt
+  masih aktif**. Matikan di pengaturan fungsi + redeploy.
+- `403 {"error":"Origin tidak diizinkan."}` → `ALLOWED_ORIGINS` belum
+  diset / origin game belum masuk daftar. Periksa ejaan origin persis
+  sama dengan yang dikirim browser (termasuk `https://`, tanpa trailing
+  slash).
+- `500 {"error":"Kesalahan server."}` → buka **Edge Functions → Logs**,
+  cari baris `[error]`. Penyebab paling mungkin: tabel belum dibuat
+  (langkah 2.1), atau `SUPABASE_SERVICE_ROLE_KEY` tidak tersedia.
+- Game tetap jalan TANPA backend (mode offline + localStorage), tapi save
+  hanya di perangkat itu — jangan anggap save sudah aman sampai langkah 3 lolos.
+
+## 5. Rollback
+
+Bila migrasi Supabase bermasalah, lihat
+`supabase/DEPLOY-SUPABASE.md` §8: kembalikan `src/cloud.js` lama +
+hapus 2 meta dari `index.html`, push. Backend Workers/D1 lama tetap
+utuh di `worker/` sebagai arsip rollback (lihat `worker/DEPRECATED.md`
+dan bagian HISTORIS di bawah).
+
+## Catatan biaya
+
+Free tier Supabase: Postgres 500 MB, Edge Functions 500 ribu
+invokasi/bulan, egress 5 GB/bulan. Game ini jauh di bawah itu
+(satu save < 64 KB; akun test puluhan). Project ini Free; tidak ada
+kartu kredit terpasang. Bila kelak butuh naik tier, itu keputusan Izka.
+
+---
+
+# HISTORIS — Cloudflare Pages + Workers + D1 (legacy, TIDAK di-deploy)
+
+> **JANGAN ikuti langkah di bawah ini untuk deploy.** Ini adalah
+> rencana deploy lama (sebelum migrasi Supabase, Nov 2026) yang
+> dipertahankan apa adanya sebagai referensi + arsip rollback.
+> Backend Workers + D1 TIDAK PERNAH ter-deploy ke produksi (wrangler
+> di VM tidak terautentikasi) dan TIDAK AKAN di-deploy — backend live
+> adalah Supabase (lihat bagian atas file ini). Kode legacy ada di
+> `worker/` — lihat `worker/DEPRECATED.md`.
+
+Status saat itu: **BELUM TER-DEPLOY.** Wrangler 4.166.0 ada di VM tapi
 **tidak terautentikasi** (`wrangler whoami` → "You are not authenticated"),
 tidak ada `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` di environment.
 Yang sudah **teruji lokal**: `wrangler dev --local` + D1 lokal (register →
 login → save → load → lockout 5x → logout, semua lolos) dan game di
-headless Chrome (29/29 landscape, 25/25 portrait). Langkah di bawah ini
-yang tersisa — dikerjakan Izka (atau agen dengan sesi Cloudflare login).
+headless Chrome (29/29 landscape, 25/25 portrait).
 
-## 0. Prasyarat
+## 0. Prasyarat (historis)
 
 - Akun Cloudflare (free tier cukup: Workers + D1 + Pages semua ada free tier).
 - Di VM ini, dari repo `~/workspace/lembah-hijau-game/`.
 
-## 1. Login wrangler (Izka yang lakukan — butuh browser)
+## 1. Login wrangler (historis — butuh browser)
 
 ```bash
 npx wrangler login
@@ -22,7 +145,7 @@ npx wrangler login
 npx wrangler whoami
 ```
 
-## 2. Buat database D1 + terapkan skema
+## 2. Buat database D1 + terapkan skema (historis)
 
 ```bash
 cd ~/workspace/lembah-hijau-game/worker
@@ -46,14 +169,14 @@ npx wrangler d1 execute lembah-hijau-db --local --file=./schema.sql
 ```
 ```
 
-## 3. Deploy Worker API
+## 3. Deploy Worker API (historis)
 
 ```bash
 npx wrangler deploy
 # Catat URL-nya, mis: https://lembah-hijau-api.<subdomain>.workers.dev
 ```
 
-## 4. Deploy game statis ke Cloudflare Pages
+## 4. Deploy game statis ke Cloudflare Pages (historis)
 
 ```bash
 cd ~/workspace/lembah-hijau-game
@@ -62,7 +185,7 @@ npx wrangler pages deploy . --project-name=lembah-hijau
 # (File _headers di root ikut ter-deploy sebagai security headers.)
 ```
 
-## 5. Sambungkan game <-> API (pilih SATU cara)
+## 5. Sambungkan game <-> API (historis — pilih SATU cara)
 
 **Cara A (disarankan, tanpa ubah kode):** isi origin game ke Worker.
 
@@ -79,7 +202,7 @@ npx wrangler deploy
 `lembah-hijau.pages.dev/api/*` -> Worker `lembah-hijau-api` (Workers Routes).
 Game memakai same-origin `/api` bila meta kosong.
 
-## 6. Verifikasi produksi (wajib sebelum diumumkan)
+## 6. Verifikasi produksi (historis — wajib sebelum diumumkan)
 
 ```bash
 curl https://lembah-hijau-api.<subdomain>.workers.dev/api/health
@@ -94,7 +217,7 @@ Lalu di browser: buka URL Pages → Buat Akun → main sebentar → tekan
 💾 Simpan → muat ulang halaman → login lagi → progress + kustomisasi
 harus kembali utuh.
 
-## 7. Kalau deploy gagal
+## 7. Kalau deploy gagal (historis)
 
 - `wrangler login` kedaluwarsa → ulangi langkah 1.
 - `database_id` belum diganti → deploy Worker gagal binding D1; isi dulu.
@@ -103,11 +226,12 @@ harus kembali utuh.
 - Game tetap jalan TANPA backend (mode offline + localStorage), tapi save
   hanya di perangkat itu — jangan anggap save sudah aman sampai langkah 6 lolos.
 
-## Catatan biaya
+## Catatan biaya (historis)
 
 Free tier: Workers 100.000 request/hari, D1 5 GB storage + 5 juta baris
 dibaca/hari, Pages unlimited bandwidth (fair use). Game ini jauh di bawah itu.
 
-## GitHub Pages (mode offline, tanpa backend)
-Game statis sudah live di https://codermisaki.github.io/lembah-hijau-game/ (branch main, `.nojekyll`).
+## GitHub Pages (mode offline, tanpa backend) — catatan historis
+
+Game statis sudah live di https://codermisaki.github.io/lembah-hijau-game/ (branch master, `.nojekyll`).
 Tanpa backend, game jalan penuh dalam mode offline: daftar/login diganti tombol "Main Offline" di layar awal, save ke localStorage. Setelah Worker ter-deploy (langkah di atas), isi meta `lh-api-base` di `index.html` dengan URL Worker agar save cloud aktif.

@@ -1,6 +1,7 @@
 // save.js — simpan otomatis ke localStorage (tiap 10 dtk + tiap aksi penting).
-// localStorage = cache/fallback offline. Backend (Cloudflare Workers + D1)
-// adalah sumber kebenaran saat online — sinkronisasi diatur di cloud.js.
+// localStorage = cache/fallback offline. Backend (Supabase Edge Function
+// lembah-hijau-api) adalah sumber kebenaran saat online — sinkronisasi
+// diatur di cloud.js.
 // Format v2 menambahkan: custom (kustomisasi karakter), updatedAt, username.
 import { sanitizeCustom } from './customization.js';
 
@@ -19,6 +20,11 @@ export function buildSaveData(state) {
     lang: state.lang, gender: state.gender, sound: state.sound, quality: state.quality,
     custom: sanitizeCustom(state.custom, state.gender),
     inv: state.inv,
+    // Lokasi tersembunyi yang sudah ditemukan (sekali per save) — tanpa ini
+    // hadiah spot terbit ulang tiap reload (duplikasi koin, Wave-1).
+    discoveredSpots: Array.isArray(state.discoveredSpots)
+      ? state.discoveredSpots.filter((s) => typeof s === 'string').slice(0, 32)
+      : [],
     plots: state.plots.map((p) => ({ crop: p.crop, growth: p.growth, watered: p.watered, hoed: p.hoed })),
     animals: state.animals,
     player: { x: state.playerX, z: state.playerZ },

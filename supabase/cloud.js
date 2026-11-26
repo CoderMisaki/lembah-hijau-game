@@ -1,10 +1,11 @@
 // cloud.js — client API backend Lembah Hijau (Supabase Edge Function).
-// DRAF untuk migrasi dari Cloudflare Workers + D1. JANGAN timpa
-// src/cloud.js yang lama sebelum migrasi ini lolos verifikasi live.
-// Setelah lolos: ganti src/cloud.js dengan file ini + isi meta
-// lh-supabase-anon-key di index.html (lihat DEPLOY-SUPABASE.md).
+// Client Supabase LIVE — file ini ADALAH client yang dipakai game
+// (index.html sudah menunjuk ke Edge Function lembah-hijau-api).
+// Migrasi sisi client SELESAI; status deploy server lihat
+// supabase/DEPLOY-SUPABASE.md.
 //
-// Perbedaan dari versi Workers (semua perilaku lain IDENTIK):
+// Catatan vs backend Workers lama (legacy, lihat worker/DEPRECATED.md;
+// semua perilaku lain IDENTIK):
 //  - Base URL default = Edge Function lembah-hijau-api di project Supabase
 //    (bisa di-override via window.LH_API_BASE atau meta lh-api-base).
 //  - Setiap request WAJIB membawa header `apikey` (anon key) agar gateway

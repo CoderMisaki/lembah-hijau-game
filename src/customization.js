@@ -1,7 +1,8 @@
 // customization.js — definisi kustomisasi karakter Lembah Hijau (low-poly #1).
-// Satu sumber kebenaran untuk opsi client; server (worker/src/index.js)
-// memvalidasi dengan allowlist yang sama. Nilai disimpan sebagai string/hex,
-// TIDAK PERNAH sebagai kode — tidak ada eval / konstruktor dinamis dari data pemain.
+// Satu sumber kebenaran untuk opsi client; server (supabase/functions/
+// lembah-hijau-api/index.ts) memvalidasi dengan allowlist yang sama.
+// Nilai disimpan sebagai string/hex, TIDAK PERNAH sebagai kode — tidak ada
+// eval / konstruktor dinamis dari data pemain.
 //
 // Kategori: skin, hairStyle + hairColor, shirtModel + shirtColor,
 // pantsModel + pantsColor, hatModel + hatColor, glassesModel + glassesColor,
@@ -21,6 +22,7 @@ export const HAIR_STYLES = [
   { id: 'long',     label: 'Panjang' },
   { id: 'bun',      label: 'Sanggul' },
   { id: 'ponytail', label: 'Kuncir' },
+  { id: 'braids',   label: 'Kepang dua' },
 ];
 
 export const HAIR_COLORS = [
@@ -50,6 +52,7 @@ export const HAT_MODELS = [
   { id: 'cap',     label: 'Topi cap' },
   { id: 'beanie',  label: 'Kupluk' },
   { id: 'bandana', label: 'Bandana' },
+  { id: 'visor',   label: 'Visor' },
 ];
 
 export const GLASSES_MODELS = [
@@ -68,7 +71,7 @@ export const SHOES_MODELS = [
 export const PALETTE = [
   { id: 'green',  hex: '#3f7d3a' },
   { id: 'pink',   hex: '#d94f70' },
-  { id: 'blue',   hex: '#4a5d8a' },
+  { id: 'blue',   hex: '#5b8fd0' },
   { id: 'purple', hex: '#7d5ba6' },
   { id: 'red',    hex: '#b03a2e' },
   { id: 'orange', hex: '#e8912a' },
@@ -91,16 +94,17 @@ export function defaultCustom(gender = 'male') {
   const female = gender === 'female';
   return {
     skin: 'medium',
-    // Anime overhaul 25 Nov 2026: Bima default spiky, Sari default long
-    // (= twin-tail untuk cewe, lihat addHair di player.js).
-    hairStyle: female ? 'long' : 'spiky',
-    hairColor: female ? 'black' : 'black',
-    shirtModel: 'tee',
-    shirtColor: female ? 'pink' : 'green',
-    pantsModel: female ? 'skirt' : 'pants',
-    pantsColor: female ? 'purple' : 'blue',
-    hatModel: 'straw',
-    hatColor: 'straw',
+    // COZY-A (redesign ref 26 Nov 2026): Bima = spiky cokelat, tanpa topi
+    // (default 'none' — sekaligus mematikan clip rambut×topi), Sari =
+    // kepang dua + visor putih + overall denim biru.
+    hairStyle: female ? 'braids' : 'spiky',
+    hairColor: 'brown',
+    shirtModel: female ? 'overall' : 'tee',
+    shirtColor: 'white',
+    pantsModel: female ? 'pants' : 'shorts',
+    pantsColor: 'blue',
+    hatModel: female ? 'visor' : 'none',
+    hatColor: female ? 'white' : 'straw',
     glassesModel: 'none',
     glassesColor: 'black',
     shoesModel: 'boots',

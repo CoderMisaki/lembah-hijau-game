@@ -64,6 +64,7 @@ function defaultState() {
     inv: { carrotSeed: 0, tomatoSeed: 0, pumpkinSeed: 0, feed: 0,
            carrot: 0, tomato: 0, pumpkin: 0, egg: 0, milk: 0 },
     plots, animals, playerX: 6, playerZ: 20, // spawn pembuka: selatan kebun/kandang,
+    discoveredSpots: [], // id lokasi tersembunyi yang sudah memberi hadiah
     // kamera awal membingkai petak kebun (timur) + kandang (barat) + sungai + pegunungan (utara)
   };
 }
@@ -80,6 +81,9 @@ class Game {
         custom: sanitizeCustom(saved.custom, saved.gender || 'male'),
         username: saved.username || null, updatedAt: saved.updatedAt || saved.savedAt || 0,
         inv: { ...this.state.inv, ...(saved.inv || {}) },
+        discoveredSpots: Array.isArray(saved.discoveredSpots)
+          ? saved.discoveredSpots.filter((s) => typeof s === 'string')
+          : [],
         playerX: saved.player?.x ?? 6, playerZ: saved.player?.z ?? 20,
       });
       if (Array.isArray(saved.plots) && saved.plots.length === this.state.plots.length) this.state.plots = saved.plots;
@@ -562,17 +566,45 @@ class Game {
       camTarget = new THREE.Vector3(px - 3, py + 3, pz - 10);
       desired = new THREE.Vector3(px - 2, py + 13, pz + 20);
     } else {
-      camTarget = new THREE.Vector3(px, py + 1.6, pz);
+      // COZY-B — start: kamera orbit halus + preset jalan/desa (tombol C).
+      // Zoom/pitch yang diminta input (o.dist/o.pitch) TIDAK dipakai mentah —
+      // _camDist/_camPitch mengikutinya dengan redaman eksponensial (~7/dtk)
+      // supaya wheel/pinch/preset terasa halus, bukan lompat. Clamp yaw/pitch
+      // tetap di input.js; clamp terrain tetap di bawah. Intro/tidur tidak
+      // lewat cabang ini (scripted/intro di atas). Preset: C = village
+      // (dist 16, pitch 0.65) <-> walk (dist 8, pitch 0.45); orbit bebas =
+      // preset null sampai C ditekan pertama kali.
+      if (this._cozyBKey !== true) {
+        this._cozyBKey = true;
+        this._camPreset = null;
+        this._camDist = this.input.orbit.dist;
+        this._camPitch = this.input.orbit.pitch;
+        window.addEventListener('keydown', (e) => {
+          if (e.repeat) return;
+          if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+          if (e.key !== 'c' && e.key !== 'C') return;
+          if (this.sleeping) return;
+          this._camPreset = this._camPreset === 'village' ? 'walk' : 'village';
+          const o2 = this.input.orbit;
+          if (this._camPreset === 'village') { o2.dist = 16; o2.pitch = 0.65; }
+          else { o2.dist = 8; o2.pitch = 0.45; }
+        });
+      }
       const o = this.input.orbit;
-      const cp = Math.cos(o.pitch), sp = Math.sin(o.pitch);
+      const kCam = 1 - Math.exp(-dt * 7);
+      this._camDist += (o.dist - this._camDist) * kCam;
+      this._camPitch += (o.pitch - this._camPitch) * kCam;
+      camTarget = new THREE.Vector3(px, py + 1.6, pz);
+      const cp = Math.cos(this._camPitch), sp = Math.sin(this._camPitch);
       desired = new THREE.Vector3(
-        px + o.dist * Math.sin(o.yaw) * cp,
-        py + 1.6 + o.dist * sp,
-        pz + o.dist * Math.cos(o.yaw) * cp,
+        px + this._camDist * Math.sin(o.yaw) * cp,
+        py + 1.6 + this._camDist * sp,
+        pz + this._camDist * Math.cos(o.yaw) * cp,
       );
       // Kamera tidak boleh masuk tanah: angkat ke terrain + 0.5 m.
       const minY = terrainHeight(desired.x, desired.z) + 0.5;
       if (desired.y < minY) desired.y = minY;
+      // COZY-B — end
     }
     this.camera.position.lerp(desired, 1 - Math.pow(0.001, dt));
     this.camera.lookAt(camTarget);

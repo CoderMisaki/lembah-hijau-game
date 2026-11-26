@@ -21,11 +21,17 @@ PIN tidak pernah disimpan di perangkat dan tidak pernah dikirim kecuali
 saat register/login (HTTPS). Sesi = token acak server (30 hari), disimpan
 di `localStorage` sebagai `lembahHijauSessionV1`.
 
-Backend: **Cloudflare Workers + D1** (`worker/`). Endpoint: `POST
-/api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`,
-`GET/PUT/DELETE /api/save`, `GET /api/health`. Detail + langkah deploy:
-[`DEPLOY.md`](DEPLOY.md). Status: **belum ter-deploy** (wrangler di VM
-tidak terautentikasi — lihat DEPLOY.md langkah 1–6).
+Backend: **Supabase** — Edge Function `lembah-hijau-api` di project
+`lembah-hijau` (`ajsliyqjucgdtbimvdtd`, ap-southeast-1) + Postgres.
+Endpoint: `POST /api/auth/register`, `POST /api/auth/login`, `POST
+/api/auth/logout`, `GET/PUT/DELETE /api/save`, `GET /api/health`.
+Client (`src/cloud.js`) sudah menunjuk ke Edge Function ini dan
+`index.html` sudah berisi meta `lh-api-base` + `lh-supabase-anon-key`;
+backend menjawab `GET /api/health` dengan `{"ok":true}` (terverifikasi
+live 26 Nov 2026). Detail + langkah deploy/rollback:
+[`DEPLOY.md`](DEPLOY.md) dan `supabase/DEPLOY-SUPABASE.md`. Backend lama
+Cloudflare Workers/D1 (`worker/`) sudah TIDAK dipakai — legacy, lihat
+[`worker/DEPRECATED.md`](worker/DEPRECATED.md).
 
 ## Kustomisasi karakter (Bima/Sari)
 
@@ -50,7 +56,7 @@ ulang tiap buka game.
 
 - Tombol 💾 **Simpan** / 📂 **Muat** di HUD + autosave tiap 10 detik.
 - **localStorage** (`lembahHijauSaveV1`, format v2) = cache/fallback offline.
-- **Backend (D1)** = sumber kebenaran saat online.
+- **Backend (Supabase)** = sumber kebenaran saat online.
 - **Aturan sinkronisasi:** saat login/mulai — server lebih baru
   (`updatedAt` lebih besar) → pakai server; lokal lebih baru (main offline)
   → upload lokal; `updatedAt` sama → server menang. Tombol Muat manual:
@@ -71,6 +77,11 @@ python3 -m http.server 8000
 Tidak ada build step. Satu-satunya dependensi runtime adalah Three.js 0.170.0 yang
 sudah di-vendor di `vendor/three.module.min.js` (MIT) lewat importmap di `index.html`.
 Tidak ada import dari CDN lain.
+
+Backend lokal (Supabase): `supabase functions serve` di `:54321` — client
+(`src/cloud.js`) otomatis memakai `http://localhost:54321` saat dibuka dari
+localhost. Backend lama Cloudflare Workers sudah tidak dipakai —
+lihat `worker/DEPRECATED.md`.
 
 ## Struktur file
 
@@ -192,9 +203,11 @@ Properti baca: `window.__LH.state`, `.player`, `.farm`, `.animals`,
 
 ## Kekurangan yang diketahui (Stage 1)
 
-- Backend (Workers + D1) **belum ter-deploy** — wrangler di VM tidak
-  terautentikasi; langkah deploy persis ada di `DEPLOY.md`. Sampai deploy,
-  save cloud tidak aktif dan game memakai localStorage + mode offline.
+- Backend **Supabase** (Edge Function `lembah-hijau-api`) sudah live —
+  `GET /api/health` menjawab `{"ok":true}` (terverifikasi 26 Nov 2026).
+  Bila login + online, save cloud aktif; bila offline, game memakai
+  localStorage + mode offline. Backend lama (Workers/D1) sudah tidak
+  dipakai — lihat `worker/DEPRECATED.md`.
 - Kamera sudut tetap (belakang-atas); belum ada rotasi kamera manual.
 - Hewan tidak bisa dibeli/dijual; jumlah ternak tetap (3 ayam + 2 sapi).
 - Satu jenis pakan untuk semua hewan; tidak ada sistem lapar/animasi makan khusus.
@@ -215,13 +228,13 @@ Properti baca: `window.__LH.state`, `.player`, `.farm`, `.animals`,
 | Cek | Hasil |
 |---|---|
 | PIN tidak pernah plaintext | ✅ PBKDF2-HMAC-SHA256, 120.000 iterasi, salt acak 16 B/user; teruji: PIN sama → hash beda per user |
-| PIN tidak di log/respons | ✅ 0 kemunculan PIN di log Worker live; respons auth hanya berisi token+username+expiresAt |
+| PIN tidak di log/respons | ✅ 0 kemunculan PIN di log backend live; respons auth hanya berisi token+username+expiresAt |
 | Token sesi | ✅ acak 32 B, disimpan sebagai hash SHA-256 di DB, kedaluwarsa 30 hari; logout mematikan token (teruji) |
 | Rate limit + lockout login | ✅ 5 gagal/15 mnt per username → kunci 15 mnt; pesan gagal generik (anti enumerasi username); teruji live 5x salah → 429, PIN benar saat terkunci tetap 429 |
 | Validasi server | ✅ semua field save divalidasi (tipe/rentang/allowlist/64 KB); field ekstra dibuang; teruji: coins berlebih, custom di luar allowlist, plots ≠24, username ≠ sesi → 400 |
 | SQL injection | ✅ semua query prepared statements + parameter binding (tidak ada string interpolation SQL) |
-| CORS | ✅ hanya origin game (env `ALLOWED_ORIGINS`; default localhost + `*.pages.dev`); origin asing → 403 (teruji) |
+| CORS | ✅ hanya origin game (secret `ALLOWED_ORIGINS` di Edge Function Supabase; default localhost + `*.pages.dev`, produksi ditambah `https://codermisaki.github.io`); origin asing → 403 (teruji di harness `supabase/worker-test.mjs` skenario 11) |
 | Tanpa secret di frontend | ✅ tidak ada token/API key di kode client; PIN hanya di input form saat auth |
 | Tanpa eval / innerHTML data pemain | ✅ tidak ada `eval`; username hanya via `textContent`; toko/inventaris dibangun via DOM API |
 | CSP | ⚠️ ada di `_headers` (Pages), tapi `script-src` memakai `'unsafe-inline'` karena importmap Three.js wajib inline — dicatat jujur, bukan diklaim ketat penuh |
-| **Belum dicek** | ❌ audit/pen-test penuh (termasuk fuzzing endpoint + uji bypass CORS/CSRF di browser nyata); uji beban rate limit dari banyak IP/isolate bersamaan (rate limit D1-backed, tapi belum diuji beban); pemulihan akun / ganti PIN belum ada |
+| **Belum dicek** | ❌ audit/pen-test penuh (termasuk fuzzing endpoint + uji bypass CORS/CSRF di browser nyata); uji beban rate limit dari banyak IP bersamaan (rate limit Postgres-backed, tapi belum diuji beban); pemulihan akun / ganti PIN belum ada |

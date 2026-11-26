@@ -112,8 +112,10 @@ Mekanisme dari referensi Sakuga VFX BOLEH dipakai (lihat
 - Satu elemen dominan per layar. `:focus-visible` di semua elemen interaktif.
   Tap target ≥44px. Responsif 390/768/1440 tanpa tabrakan; landscape game +
   overlay portrait tetap.
-- Perilaku & teks TIDAK berubah (kecuali visual). Backend (worker/,
-  supabase/, src/cloud.js, src/save.js, auth/PIN, save/load) JANGAN disentuh.
+- Perilaku & teks TIDAK berubah (kecuali visual). Backend (supabase/,
+  src/cloud.js, src/save.js, auth/PIN, save/load) JANGAN disentuh.
+  Backend lama Workers/D1 (`worker/`) sudah tidak dipakai — legacy,
+  lihat `worker/DEPRECATED.md`; jangan disentuh juga kecuali rollback.
 - JANGAN commit/push — koordinator utama yang melakukannya.
 
 ## Lane (overhaul anime, koordinator 2026-11-25)

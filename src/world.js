@@ -55,6 +55,34 @@ export function buildWorld(scene) {
   let elapsed = 0;
   let quality = 'medium'; // diubah lewat setQuality(); 'low' mematikan partikel + goyangan
   let grassSway = true;
+  // ---- COZY-B: cuaca + musim + angin (state RUNTIME saja — TIDAK masuk
+  // save v2; lihat LANE-B-REPORT.md §6 untuk field yang harus dimigrasi F2).
+  let season = 'spring'; // 'spring' | 'summer' | 'autumn' | 'winter'
+  let weather = 'sunny'; // 'sunny' | 'rain' | 'cloudy' | 'storm'
+  let weatherTimer = 0; // auto-cycle cuaca tiap ~50 dtk nyata
+  // weatherMix = parameter tampil yang di-lerp menuju preset target
+  // (transisi cuaca ~3 dtk, bukan lompat). setWeather() men-snap langsung.
+  const WEATHER_PRESETS = {
+    sunny:  { sunMul: 1,    tintK: 0,    fogMul: 1,    rain: 0 },
+    cloudy: { sunMul: 0.55, tintK: 0.55, fogMul: 0.75, rain: 0 },
+    rain:   { sunMul: 0.45, tintK: 0.7,  fogMul: 0.6,  rain: 0.6 },
+    storm:  { sunMul: 0.3,  tintK: 0.85, fogMul: 0.45, rain: 1 },
+  };
+  let weatherMix = { ...WEATHER_PRESETS.sunny };
+  let windTime = 0;
+  // SATU envelope angin per frame (ARCHITECTURE.md §13.7): dihitung sekali
+  // di update(), lalu dipakai rumput + tajuk + rotor kincir + awan + kelopak.
+  const wind = { speed: 1, dir: 0.6, gust: 0.5, x: 0.82, z: 0.57 };
+  let flashT = 0, flashNext = 5; // petir (storm): timer + durasi kilat
+  // Lokasi tersembunyi (COZY-B): penanda halus di dunia; masuk ke salah
+  // satunya = +koin SEKALI per save (state.discoveredSpots, lihat §6 laporan).
+  const HIDDEN_SPOTS = [
+    { id: 'sakura-grove',  x: -34, z: -44, r: 2.5, reward: 30, name: 'Rumpun Sakura',    nameEn: 'Sakura Grove' },
+    { id: 'lake-shore',    x: 70,  z: -66, r: 2.5, reward: 40, name: 'Tepi Danau',       nameEn: 'Lake Shore' },
+    { id: 'mountain-nook', x: -96, z: 28,  r: 2.5, reward: 50, name: 'Ceruk Gunung',     nameEn: 'Mountain Nook' },
+    { id: 'old-well',      x: -60, z: -40, r: 2.5, reward: 35, name: 'Sumur Tua',        nameEn: 'Old Well' },
+    { id: 'windmill-back', x: -68, z: 62,  r: 2.5, reward: 30, name: 'Belakang Kincir',  nameEn: 'Behind the Windmill' },
+  ];
   const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3();
   const _dummy = new THREE.Object3D();
 
@@ -105,6 +133,14 @@ export function buildWorld(scene) {
     { x: 3, z: -41, w: 6, d: 5, wall: 0xead9b8, roof: 0xb03a2e, roofType: 'cone', chimney: false, rotY: Math.PI / 2, garden: true },
     { x: -5, z: -46, w: 6, d: 5, wall: 0xf3e3c0, roof: 0x6e4a26, roofType: 'gable', chimney: true, rotY: 0, garden: false },
     { x: 35, z: -29, w: 6, d: 5, wall: 0xe8d9b0, roof: 0x8a4a2f, roofType: 'pyramid', chimney: false, rotY: -Math.PI / 2, garden: true },
+    // COZY-B: 4 rumah lagi supaya alun-alun terasa "rame" (sisi barat + utara
+    // yang tadinya kosong). Atap bervariasi: genting biru gelap (aksen sakura-
+    // village map-2), plum, hijau daun, merah. Posisi di luar PATHS + di luar
+    // footprint rumah lama (cek manual vs houseFootprint + distToPaths).
+    { x: -2, z: -33, w: 6.5, d: 5.5, wall: 0xf0d8b0, roof: 0x2f5d8a, roofType: 'gable', chimney: true, rotY: Math.PI / 2, garden: true },
+    { x: 38, z: -42, w: 6, d: 5, wall: 0xe8d9b0, roof: 0x7a3a5a, roofType: 'pyramid', chimney: false, rotY: 0, garden: false },
+    { x: -14, z: -38, w: 6, d: 5, wall: 0xf3e3c0, roof: 0x3a7a5c, roofType: 'gable', chimney: true, rotY: 0, garden: true },
+    { x: 24, z: -46, w: 5.5, d: 5, wall: 0xead9b8, roof: 0xb03a2e, roofType: 'cone', chimney: false, rotY: -Math.PI / 2, garden: false },
   ];
   // Footprint dunia (AABB) satu rumah baru — dipakai eksklusi pohon/dekor + collider.
   function houseFootprint(h) {
@@ -135,10 +171,13 @@ export function buildWorld(scene) {
   const cBloomPink = new THREE.Color(0xff8fb3), cBloomYellow = new THREE.Color(0xffd94d),
         cBloomWhite = new THREE.Color(0xf5f2e8), cBloomLav = new THREE.Color(0xc9a7ff);
   const pathBlend = (d) => 1 - smoothstep(1.1, 1.7, d);
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), z = pos.getZ(i);
-    const h = terrainHeight(x, z);
-    pos.setY(i, h);
+  // COZY-B: warna satu vertex terrain sebagai FUNGSI (x, z, h, musim) —
+  // dipakai saat build DAN saat setSeason() mewarnai ulang terrain tanpa
+  // mengubah tinggi (normal tidak dihitung ulang). Tint musim: semi segar,
+  // panas pekat, gugur keemasan, dingin pucat bersalju.
+  const cSeasonSpring = new THREE.Color(0x7ddc5a), cSeasonSummer = new THREE.Color(0x2f9e3a),
+        cSeasonAutumn = new THREE.Color(0xd9a441), cSeasonWinter = new THREE.Color(0xe8eef7);
+  function vertexColor(x, z, h, sn) {
     const r = Math.hypot(x, z);
     const dRiver = Math.abs(x - riverCenterX(z));
     const n = noise2(x * 0.7, z * 0.7) * 0.5 + 0.5;
@@ -165,6 +204,25 @@ export function buildWorld(scene) {
     // Jalan tanah: semua poliline PATHS, tepi lembut (jarak titik-ke-segmen).
     const pb = pathBlend(distToPaths(x, z));
     if (pb > 0) c = c.lerp(pb > 0.85 ? cDirt : cDirtEdge, pb);
+    // Tint musim (di atas segalanya, supaya gugur/dingin terasa di seluruh map).
+    if (sn === 'autumn') c.lerp(cSeasonAutumn, 0.32);
+    else if (sn === 'winter') c.lerp(cSeasonWinter, 0.5);
+    else if (sn === 'summer') c.lerp(cSeasonSummer, 0.12);
+    else c.lerp(cSeasonSpring, 0.08);
+    return c;
+  }
+  function applySeasonTerrain() {
+    for (let i = 0; i < pos.count; i++) {
+      const c = vertexColor(pos.getX(i), pos.getZ(i), pos.getY(i), season);
+      colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+    }
+    geo.attributes.color.needsUpdate = true;
+  }
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    const h = terrainHeight(x, z);
+    pos.setY(i, h);
+    const c = vertexColor(x, z, h, season);
     colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -727,7 +785,7 @@ export function buildWorld(scene) {
     treeSpots.push({ x, z, s: 0.9 + rnd() * 0.35, type: (gx + gz) % 2 === 0 ? 'apple' : 'orange' });
   }
   let guard = 0;
-  while (treeSpots.length < 72 && guard++ < 1500) {
+  while (treeSpots.length < 84 && guard++ < 1500) { // COZY-B: 72 -> 84, lebih rimbun
     const x = (rnd() - 0.5) * 230, z = (rnd() - 0.5) * 230;
     const r = Math.hypot(x, z);
     if (r > 112 || r < 8) continue;
@@ -749,7 +807,12 @@ export function buildWorld(scene) {
     if (insideHouseFootprints(x, z, 3)) continue;                // rumah desa
     if (inNightMarket(x, z, 2)) continue;                          // pasar malam (Lane P)
     if (treeSpots.some((p) => Math.hypot(p.x - x, p.z - z) < 5)) continue;
-    treeSpots.push({ x, z, s: 0.8 + rnd() * 0.6, type: TREE_TYPES[Math.floor(rnd() * 4)] });
+    treeSpots.push({ x, z, s: 0.8 + rnd() * 0.6, type: TREE_TYPES[Math.floor(rnd() * 5)] }); // COZY-B: *5 — sakura ikut tersebar (dulu *4, sakura tidak pernah muncul)
+  }
+  // COZY-B: rumpun sakura (5 pohon, posisi tetap) di (-34,-44) — juga lokasi
+  // tersembunyi 'sakura-grove'. Di luar PATHS + jalur padang bunga (cek manual).
+  for (const [gx, gz, gs] of [[0, 0, 1.2], [6, 2, 1.0], [-5, 4, 1.1], [3, -5, 1.05], [-6, -4, 0.95]]) {
+    treeSpots.push({ x: -34 + gx, z: -44 + gz, s: gs, type: 'sakura' });
   }
   // Susun daftar instans: batang, cabang (1-3/pohon), gumpalan tajuk (2-4/pohon
   // daun; pinus 2 kerucut), buah (4-7/pohon buah, menempel di tajuk).
@@ -771,8 +834,10 @@ export function buildWorld(scene) {
     }
     const topY = y + 2.2 * p.s;
     if (p.type === 'pine') {
-      coneList.push({ x: p.x, y: topY + 0.8 * p.s, z: p.z, rad: 1.7 * p.s, h: 2.6 * p.s });
-      coneList.push({ x: p.x, y: topY + 2.0 * p.s, z: p.z, rad: 1.2 * p.s, h: 2.2 * p.s });
+      coneList.push({ x: p.x, y: topY + 0.8 * p.s, z: p.z, rad: 1.7 * p.s, h: 2.6 * p.s,
+        seed: ((coneList.length * 2654435761) >>> 0) / 4294967296, ph: ((coneList.length * 40503) % 628) / 100 });
+      coneList.push({ x: p.x, y: topY + 2.0 * p.s, z: p.z, rad: 1.2 * p.s, h: 2.2 * p.s,
+        seed: ((coneList.length * 2654435761) >>> 0) / 4294967296, ph: ((coneList.length * 40503) % 628) / 100 });
     } else {
       const nBl = 2 + Math.floor(rnd() * 3);
       const blobs = [];
@@ -780,6 +845,11 @@ export function buildWorld(scene) {
         const a = rnd() * Math.PI * 2, rr = rnd() * 0.9 * p.s;
         const bl = { x: p.x + Math.cos(a) * rr, y: topY + 0.7 * p.s + (rnd() - 0.5) * 0.8 * p.s,
           z: p.z + Math.sin(a) * rr, s: (1.1 + rnd() * 0.6) * p.s,
+          type: p.type,
+          // COZY-B: seed + fase deterministik (hash indeks, BUKAN rnd() —
+          // dipakai recolor musim + goyang tajuk tanpa menggeser layout).
+          seed: ((blobList.length * 2654435761) >>> 0) / 4294967296,
+          ph: ((blobList.length * 40503) % 628) / 100,
           // Sakura: kanopi pink berlapis (3 tone); lainnya hijau terang.
           c: p.type === 'sakura'
             ? sakuraCols[Math.floor(rnd() * sakuraCols.length)].clone()
@@ -830,18 +900,66 @@ export function buildWorld(scene) {
   });
   _q.identity();
   branches.instanceColor.needsUpdate = true;
-  blobList.forEach((bl, i) => {
-    m4.compose(new THREE.Vector3(bl.x, bl.y, bl.z), q, new THREE.Vector3(bl.s, bl.s * 0.85, bl.s));
-    crownBlobs.setMatrixAt(i, m4);
-    crownBlobs.setColorAt(i, bl.c);
-  });
+  // COZY-B: tulis ulang matriks tajuk (dipakai saat build + tiap frame saat
+  // grassSway, supaya tajuk bergoyang mengikuti angin; musim dingin tajuk
+  // mengecil 0.55x = "gundul bersalju").
+  function writeCrownMatrices() {
+    const leanAmp = grassSway ? 0.06 * wind.speed : 0;
+    blobList.forEach((bl, i) => {
+      const lean = leanAmp * Math.sin(elapsed * 1.1 + bl.ph);
+      const sc = bl.s * (season === 'winter' ? 0.55 : 1);
+      _dummy.position.set(bl.x + wind.x * lean, bl.y, bl.z + wind.z * lean);
+      _dummy.rotation.set(0, 0, lean * 0.5);
+      _dummy.scale.set(sc, sc * 0.85, sc);
+      _dummy.updateMatrix();
+      crownBlobs.setMatrixAt(i, _dummy.matrix);
+    });
+    crownBlobs.instanceMatrix.needsUpdate = true;
+    coneList.forEach((cn, i) => {
+      const lean = leanAmp * 0.5 * Math.sin(elapsed * 1.0 + cn.ph);
+      _dummy.position.set(cn.x + wind.x * lean, cn.y, cn.z + wind.z * lean);
+      _dummy.rotation.set(0, 0, lean * 0.4);
+      _dummy.scale.set(cn.rad, cn.h, cn.rad);
+      _dummy.updateMatrix();
+      pineCones.setMatrixAt(i, _dummy.matrix);
+    });
+    pineCones.instanceMatrix.needsUpdate = true;
+  }
+  // COZY-B: warna tajuk per musim. Semi = sakura pink + hijau segar; panas =
+  // semua hijau pekat (sakura pun berdaun di musim panas); gugur = emas/merah;
+  // dingin = salju pucat.
+  const cAutumnPick = [0xe8a33d, 0xd9382b, 0xf2d06b, 0xc96a2e].map((c) => new THREE.Color(c));
+  function seasonCrownColor(type, seed01) {
+    if (season === 'spring') {
+      return type === 'sakura'
+        ? sakuraCols[Math.floor(seed01 * sakuraCols.length)].clone()
+        : crownA.clone().lerp(crownB, seed01);
+    }
+    if (season === 'summer') return new THREE.Color(0x2a9d4a).lerp(new THREE.Color(0x4fc94f), seed01);
+    if (season === 'autumn') return cAutumnPick[Math.floor(seed01 * cAutumnPick.length)].clone();
+    return new THREE.Color(0xe8eef7).lerp(new THREE.Color(0xcfd8e8), seed01);
+  }
+  function applySeasonCrowns() {
+    blobList.forEach((bl, i) => crownBlobs.setColorAt(i, seasonCrownColor(bl.type, bl.seed)));
+    crownBlobs.instanceColor.needsUpdate = true;
+    // Sakura hero (non-instanced): warnai ulang material kanopinya juga.
+    for (const { mesh, k } of heroSakuraBlobs) {
+      mesh.material.color.copy(seasonCrownColor('sakura', (k + 0.5) / 3));
+    }
+    coneList.forEach((cn, i) => {
+      const c = season === 'winter' ? new THREE.Color(0x9fb8a8)
+        : season === 'autumn' ? new THREE.Color(0x7a6a2e)
+        : pineA.clone().lerp(pineB, cn.seed);
+      pineCones.setColorAt(i, c);
+    });
+    pineCones.instanceColor.needsUpdate = true;
+    writeCrownMatrices(); // musim dingin mengubah skala tajuk
+  }
+  blobList.forEach((bl, i) => crownBlobs.setColorAt(i, bl.c));
   crownBlobs.instanceColor.needsUpdate = true;
-  coneList.forEach((cn, i) => {
-    m4.compose(new THREE.Vector3(cn.x, cn.y, cn.z), q, new THREE.Vector3(cn.rad, cn.h, cn.rad));
-    pineCones.setMatrixAt(i, m4);
-    pineCones.setColorAt(i, pineA.clone().lerp(pineB, rnd()));
-  });
+  coneList.forEach((cn, i) => pineCones.setColorAt(i, pineA.clone().lerp(pineB, rnd())));
   pineCones.instanceColor.needsUpdate = true;
+  writeCrownMatrices();
   fruitList.forEach((fr, i) => {
     m4.compose(new THREE.Vector3(fr.x, fr.y, fr.z), q, new THREE.Vector3(1, 1, 1));
     fruits.setMatrixAt(i, m4);
@@ -856,6 +974,12 @@ export function buildWorld(scene) {
   // ---- Sakura hero (3 pohon biasa, bukan instanced — dapat outline tegas):
   // kanopi pink berlapis 3 tone di tepi alun-alun + dekat rumah/toko.
   // Posisi dipilih di luar jalur (cek PATHS) + luar footprint rumah.
+  // COZY-B: hero sakura dikumpulkan supaya update() bisa menggoyangnya pelan
+  // mengikuti angin (rotasi kecil, bukan matriks per-frame), dan supaya
+  // applySeasonCrowns() bisa mewarnai ulang kanopinya per musim (kalau tidak,
+  // sakura hero tetap pink di musim dingin — terlihat di screenshot winter).
+  const heroSakura = [];
+  const heroSakuraBlobs = []; // {mesh, k} — kanopi per pohon hero
   for (const [sx2, sz2, ss] of [[10, -27, 1.15], [24, -27, 1.0], [-6, -14, 1.25]]) {
     const sy2 = terrainHeight(sx2, sz2);
     const sak = new THREE.Group();
@@ -866,10 +990,12 @@ export function buildWorld(scene) {
       const blob = new THREE.Mesh(new THREE.SphereGeometry(1.35 - k * 0.25, 10, 8), mat(sakCols[k]));
       blob.position.set((k - 1) * 0.9, 2.9 + k * 0.55, (k % 2 ? -0.4 : 0.35));
       blob.scale.y = 0.8; blob.castShadow = true; addOutline(blob, 1.04); sak.add(blob);
+      heroSakuraBlobs.push({ mesh: blob, k });
     }
     sak.position.set(sx2, sy2, sz2);
     sak.scale.setScalar(ss);
     group.add(sak);
+    heroSakura.push(sak);
     colliders.push({ minX: sx2 - 0.5, maxX: sx2 + 0.5, minZ: sz2 - 0.5, maxZ: sz2 + 0.5 });
   }
 
@@ -918,7 +1044,7 @@ export function buildWorld(scene) {
   for (let i = 0; i < 6; i++) {
     bushSpots.push({ x: MEADOW.x + (rnd() - 0.5) * 30, z: MEADOW.z + (rnd() - 0.5) * 22, s: 0.6 + rnd() * 0.6 });
   }
-  const bushes = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 7, 5), mat(0x4a8f3c), bushSpots.length);
+  const bushes = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 7, 5), mat(0xffffff), bushSpots.length); // COZY-B: putih — warna murni dari instanceColor (musim terlihat)
   const cBushA = new THREE.Color(0x2fbf4a), cBushB = new THREE.Color(0x8fe388);
   bushSpots.forEach((p, i) => {
     const y = terrainHeight(p.x, p.z);
@@ -976,9 +1102,9 @@ export function buildWorld(scene) {
     if (inNightMarket(x, z, 2)) continue;                          // pasar malam (Lane P)
     flowerSpots.push({ x, z });
   }
-  // Padang bunga luas: 120 bunga padat di sekitar (-50,-55).
+  // Padang bunga luas: 170 bunga padat di sekitar (-50,-55). // COZY-B: 120 -> 170
   guard = 0;
-  while (flowerSpots.length < 210 && guard++ < 1200) {
+  while (flowerSpots.length < 260 && guard++ < 1200) { // COZY-B: 210 -> 260
     const x = MEADOW.x + (rnd() - 0.5) * (MEADOW.rx * 2);
     const z = MEADOW.z + (rnd() - 0.5) * (MEADOW.rz * 2);
     if (Math.abs(x - riverCenterX(z)) < 5.5) continue;
@@ -1004,7 +1130,7 @@ export function buildWorld(scene) {
   // ---- Rumput bergoyang (instanced, 420 tuft; goyang di update(), mati di low)
   const grassData = [];
   guard = 0;
-  while (grassData.length < 420 && guard++ < 4000) {
+  while (grassData.length < 520 && guard++ < 4000) { // COZY-B: 420 -> 520
     const x = (rnd() - 0.5) * 224, z = (rnd() - 0.5) * 224;
     const r = Math.hypot(x, z);
     if (r < 6 || r > 112) continue;
@@ -1015,10 +1141,11 @@ export function buildWorld(scene) {
     if (distToPaths(x, z) < 1.8) continue;
     if (insideHouseFootprints(x, z, 1.5)) continue;
     if (inNightMarket(x, z, 2)) continue;                          // pasar malam (Lane P)
-    grassData.push({ x, z, y: terrainHeight(x, z), s: 0.7 + rnd() * 0.9, ph: rnd() * Math.PI * 2 });
+    grassData.push({ x, z, y: terrainHeight(x, z), s: 0.7 + rnd() * 0.9, ph: rnd() * Math.PI * 2,
+      v: ((grassData.length * 2654435761) >>> 0) / 4294967296 }); // COZY-B: v = hash variasi warna
   }
   const grassTufts = new THREE.InstancedMesh(new THREE.ConeGeometry(0.09, 0.55, 4),
-    mat(0x6da344), grassData.length);
+    mat(0xffffff), grassData.length); // COZY-B: putih — warna murni dari instanceColor (musim terlihat; material hijau lama mengalikan tint musim jadi tetap hijau di winter)
   grassTufts.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   const cGrassTuftA = new THREE.Color(0x4fc94f), cGrassTuftB = new THREE.Color(0xa8e063);
   grassData.forEach((g, i) => {
@@ -1031,6 +1158,26 @@ export function buildWorld(scene) {
   });
   grassTufts.instanceColor.needsUpdate = true;
   group.add(grassTufts);
+
+  // COZY-B: warna rumput + semak per musim (dipanggil setSeason; bunga dan
+  // buah hilang di musim dingin). Semak memakai hash indeks (deterministik).
+  function applySeasonVegetation() {
+    const pal = season === 'spring' ? [0x4fc94f, 0xa8e063]
+      : season === 'summer' ? [0x2f9e3a, 0x6fd35a]
+      : season === 'autumn' ? [0xd9a441, 0xe8c96a]
+      : [0xdde8f0, 0xf4f8ff];
+    const gA = new THREE.Color(pal[0]), gB = new THREE.Color(pal[1]);
+    grassData.forEach((g, i) => grassTufts.setColorAt(i, gA.clone().lerp(gB, g.v)));
+    grassTufts.instanceColor.needsUpdate = true;
+    const bA = new THREE.Color(0x2fbf4a), bB = new THREE.Color(0x8fe388);
+    if (season === 'autumn') { bA.setHex(0xc96a2e); bB.setHex(0xe8a33d); }
+    if (season === 'winter') { bA.setHex(0xc9d4de); bB.setHex(0xe8eef7); }
+    bushSpots.forEach((p, i) => bushes.setColorAt(i, bA.clone().lerp(bB, ((i * 2654435761) >>> 0) / 4294967296)));
+    bushes.instanceColor.needsUpdate = true;
+    flowerHeads.visible = season !== 'winter';
+    flowerStems.visible = season !== 'winter';
+    fruits.visible = season !== 'winter';
+  }
 
   // ---- Peti kayu yang bisa didorong
   const crate = new THREE.Group();
@@ -1090,7 +1237,36 @@ export function buildWorld(scene) {
   // Kelopak sakura beterbangan di sekitar pohon sakura hero (alun-alun + rumah).
   const petals = makePoints(50, 0xff8fb3, 0.16, 8, -22, 46, 2, 7);
   petals.material.opacity = 0.85;
+  // COZY-B: hujan + salju + daun gugur (Points; mati di low seperti partikel lain).
+  const rain = makePoints(500, 0x9fc8e8, 0.3, 0, 0, 170, 0, 30);
+  rain.material.opacity = 0.7; rain.visible = false;
+  const snow = makePoints(150, 0xffffff, 0.25, 0, 0, 120, 0, 25);
+  snow.material.opacity = 0.9; snow.visible = false;
+  const leaves = makePoints(60, 0xe8a33d, 0.18, 8, -22, 46, 1, 7);
+  leaves.material.opacity = 0.9; leaves.visible = false;
   group.add(pollen); group.add(fireflies); group.add(petals);
+  group.add(rain); group.add(snow); group.add(leaves);
+  // COZY-B: kelopak/daun hanyut di permukaan sungai (Points, ikut arus +Z +
+  // angin; posisi x selalu mengikuti riverCenterX(z) supaya tetap di air).
+  const driftBase = [];
+  const driftGeo = new THREE.BufferGeometry();
+  {
+    const arr = new Float32Array(40 * 3);
+    for (let i = 0; i < 40; i++) {
+      const z = -120 + i * 6 + ((i * 37) % 5);
+      const off = ((i * 53) % 7) - 3;
+      driftBase.push({ z, off, s: 0.5 + ((i * 29) % 10) / 10 });
+      arr[i * 3] = riverCenterX(z) + off;
+      arr[i * 3 + 1] = WATER_Y + 0.06;
+      arr[i * 3 + 2] = z;
+    }
+    driftGeo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+  }
+  const drift = new THREE.Points(driftGeo, new THREE.PointsMaterial({
+    color: 0xffb3c9, size: 0.16, transparent: true, opacity: 0.85, sizeAttenuation: true, depthWrite: false,
+  }));
+  drift.frustumCulled = false;
+  group.add(drift);
 
   // ---- Kupu-kupu: 4 ekor, sayap mengepak (2 pivot + 2 plane per ekor).
   const butterflies = [];
@@ -1114,6 +1290,220 @@ export function buildWorld(scene) {
     group.add(bg);
     butterflies.push({ group: bg, wings, cx: 14 + b * 3, cz: 8 + (b % 2) * 3, ph: rnd() * Math.PI * 2 });
   }
+
+  // ---- COZY-B: kepadatan desa (campuran tapi singkron: basis chibi lokal,
+  // aksen sakura/torii dibatasi satu palet). Semua posisi TETAP (tanpa rnd)
+  // supaya tidak menggeser layout scatter ber-seed di atas. InstancedMesh
+  // dipakai untuk semua yang berulang (lampion, lempeng batu, alang-alang,
+  // batu sungai, pagar kincir, semak pagar, batu penanda, barang lapak).
+  // Lapak pasar di sekitar alun-alun (counter + atap + tiang; barang = 1 InstancedMesh).
+  const lanternMat = new THREE.MeshToonMaterial({ color: 0xffe9a8, emissive: 0xff9a3c, emissiveIntensity: 0.25, gradientMap: TOON_GRADIENT });
+  function makeStall(x, z, rotY, awningColor) {
+    const g = new THREE.Group();
+    const cy = terrainHeight(x, z);
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.0, 1.0), mat(0x8a6b3f));
+    counter.position.y = 0.5; counter.castShadow = true; addOutline(counter, 1.04); g.add(counter);
+    const awning = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.12, 1.6), mat(awningColor));
+    awning.position.set(0, 2.2, 0.1); awning.rotation.x = 0.12; awning.castShadow = true; addOutline(awning, 1.04); g.add(awning);
+    for (const s of [-1.2, 1.2]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 2.2, 6), mat(0x6e4a26));
+      post.position.set(s, 1.1, 0.75); g.add(post);
+    }
+    g.position.set(x, cy, z); g.rotation.y = rotY;
+    group.add(g);
+    // AABB dilebihkan sedikit (rotasi membuat footprint diagonal lebih lebar).
+    colliders.push({ minX: x - 1.5, maxX: x + 1.5, minZ: z - 1.1, maxZ: z + 1.1 });
+  }
+  const stallDefs = [[8, -27, 2.03, 0xff8fb3], [24, -25, -2.21, 0xffc93c], [12, -38, 0.52, 0x2fbf4a]];
+  for (const [sx3, sz3, srot, acol] of stallDefs) makeStall(sx3, sz3, srot, acol);
+  const stallGoods = new THREE.InstancedMesh(new THREE.SphereGeometry(0.16, 6, 5), mat(0xffffff), 9);
+  const goodsCols = [0xe87a2a, 0xd9382b, 0x9ccb5e, 0xffd94d, 0xff8fb3, 0xe8912a, 0xd9382b, 0x9ccb5e, 0xffd94d].map((c) => new THREE.Color(c));
+  stallDefs.forEach(([sx3, sz3, srot], si) => {
+    const sy3 = terrainHeight(sx3, sz3);
+    for (let k = 0; k < 3; k++) {
+      const lx = (k - 1) * 0.7, lz = 0.1; // lokal di atas counter, diputar rotY
+      _dummy.position.set(sx3 + lx * Math.cos(srot) + lz * Math.sin(srot), sy3 + 1.12,
+        sz3 - lx * Math.sin(srot) + lz * Math.cos(srot));
+      _dummy.rotation.set(0, 0, 0); _dummy.scale.set(1, 1, 1); _dummy.updateMatrix();
+      stallGoods.setMatrixAt(si * 3 + k, _dummy.matrix);
+      stallGoods.setColorAt(si * 3 + k, goodsCols[si * 3 + k]);
+    }
+  });
+  stallGoods.instanceColor.needsUpdate = true;
+  group.add(stallGoods);
+  // Lampion jalan (8 titik di sekitar alun-alun, di luar tepi jalan tanah):
+  // tiang + kotak lampu (menyala senja/malam via lanternMat) + atap kerucut.
+  const lanternSpots = [[10, -33.5], [22, -33.5], [13.5, -25], [18.5, -37], [12, -27], [20, -35], [28, -34.5], [4, -31]];
+  const lanternPosts = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.09, 0.11, 1.6, 6), mat(0x6e4a26), lanternSpots.length);
+  const lanternBoxes = new THREE.InstancedMesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), lanternMat, lanternSpots.length);
+  const lanternRoofs = new THREE.InstancedMesh(new THREE.ConeGeometry(0.42, 0.35, 4), mat(0x8a4a2f), lanternSpots.length);
+  lanternSpots.forEach(([lx, lz], i) => {
+    const ly = terrainHeight(lx, lz);
+    _dummy.rotation.set(0, 0, 0); _dummy.scale.set(1, 1, 1);
+    _dummy.position.set(lx, ly + 0.8, lz); _dummy.updateMatrix(); lanternPosts.setMatrixAt(i, _dummy.matrix);
+    _dummy.position.set(lx, ly + 1.75, lz); _dummy.updateMatrix(); lanternBoxes.setMatrixAt(i, _dummy.matrix);
+    _dummy.position.set(lx, ly + 2.1, lz); _dummy.rotation.set(0, Math.PI / 4, 0); _dummy.updateMatrix(); lanternRoofs.setMatrixAt(i, _dummy.matrix);
+    colliders.push({ minX: lx - 0.25, maxX: lx + 0.25, minZ: lz - 0.25, maxZ: lz + 0.25 });
+  });
+  _dummy.rotation.set(0, 0, 0);
+  group.add(lanternPosts); group.add(lanternBoxes); group.add(lanternRoofs);
+  // Jalan batu: cincin lempeng di sekeliling sumur + anak tangga batu ke utara.
+  const slabSpots = [];
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * Math.PI * 2;
+    slabSpots.push({ x: SQUARE.x + Math.cos(a) * 4.5, z: SQUARE.z + Math.sin(a) * 4.5, rot: a });
+  }
+  for (let k = 0; k < 6; k++) slabSpots.push({ x: 16, z: -26 - k * 1.4, rot: 0.2 * k });
+  const slabs = new THREE.InstancedMesh(new THREE.BoxGeometry(1.2, 0.08, 1.2), mat(0xffffff), slabSpots.length);
+  const cSlabA = new THREE.Color(0xb8b0a0), cSlabB = new THREE.Color(0x8d8578);
+  slabSpots.forEach((p, i) => {
+    _dummy.position.set(p.x, terrainHeight(p.x, p.z) + 0.04, p.z);
+    _dummy.rotation.set(0, p.rot, 0); _dummy.scale.set(1, 1, 1); _dummy.updateMatrix();
+    slabs.setMatrixAt(i, _dummy.matrix);
+    slabs.setColorAt(i, cSlabA.clone().lerp(cSlabB, ((i * 2654435761) >>> 0) / 4294967296));
+  });
+  _dummy.rotation.set(0, 0, 0);
+  slabs.instanceColor.needsUpdate = true;
+  group.add(slabs);
+  // Bangku tambahan (2): satu menghadap jalan danau, satu menghadap jalan kincir.
+  for (const [bx, bz, ry] of [[30, -36.5, 0.52], [-30, 30, -2.36]]) {
+    const by = terrainHeight(bx, bz);
+    const bench = new THREE.Group();
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.12, 0.5), mat(0x8a6b3f));
+    seat.position.y = 0.55; seat.castShadow = true; bench.add(seat);
+    for (const s of [-0.7, 0.7]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.5, 0.45), mat(0x6e4a26));
+      leg.position.set(s, 0.25, 0); bench.add(leg);
+    }
+    bench.position.set(bx, by, bz); bench.rotation.y = ry;
+    group.add(bench);
+    colliders.push({ minX: bx - 1, maxX: bx + 1, minZ: bz - 0.4, maxZ: bz + 0.4 });
+  }
+  // Alang-alang di tepi sungai (36) + batu-batu di dalam sungai (10).
+  const reedSpots = [];
+  for (let i = 0; i < 36; i++) {
+    const z = -120 + i * 6.9;
+    reedSpots.push({ x: riverCenterX(z) + (i % 2 ? 1 : -1) * (3.8 + (i % 3) * 0.5), z });
+  }
+  const reeds = new THREE.InstancedMesh(new THREE.ConeGeometry(0.07, 1.3, 4), mat(0x4a7d2e), reedSpots.length);
+  reedSpots.forEach((p, i) => {
+    _dummy.position.set(p.x, terrainHeight(p.x, p.z) + 0.6, p.z);
+    _dummy.rotation.set(0, 0, 0); _dummy.scale.set(1, 1, 1); _dummy.updateMatrix();
+    reeds.setMatrixAt(i, _dummy.matrix);
+  });
+  group.add(reeds);
+  const riverStones = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), mat(0x8d8578), 10);
+  for (let i = 0; i < 10; i++) {
+    const z = -100 + i * 22;
+    const x = riverCenterX(z) + ((i * 37) % 7) - 3;
+    _dummy.position.set(x, WATER_Y - 0.08, z);
+    _dummy.rotation.set(0, ((i * 2654435761) >>> 0) / 4294967296 * Math.PI, 0);
+    _dummy.scale.set(0.9, 0.25, 0.7); _dummy.updateMatrix();
+    riverStones.setMatrixAt(i, _dummy.matrix);
+  }
+  _dummy.rotation.set(0, 0, 0);
+  group.add(riverStones);
+  // Kincir sebagai landmark: bendera sakura berkibar (goyang di update) +
+  // 2 tumpukan jerami + cincin tiang penanda di bukit.
+  const wmFlagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 6, 6), mat(0x6e4a26));
+  wmFlagPole.position.set(-54, terrainHeight(-54, 49) + 3, 49); wmFlagPole.castShadow = true; group.add(wmFlagPole);
+  const wmFlag = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.0), mat(0xff8fb3, { side: THREE.DoubleSide }));
+  wmFlag.position.set(-53.1, terrainHeight(-54, 49) + 5.4, 49); group.add(wmFlag);
+  for (const [hx2, hz2] of [[-52, 58], [-64, 50]]) {
+    const hy2 = terrainHeight(hx2, hz2);
+    const hb = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.2, 0.8, 8), mat(0xd9a441));
+    hb.position.set(hx2, hy2 + 0.4, hz2); hb.castShadow = true; addOutline(hb); group.add(hb);
+    const ht = new THREE.Mesh(new THREE.ConeGeometry(1.15, 1.3, 8), mat(0xe8b84a));
+    ht.position.set(hx2, hy2 + 1.4, hz2); ht.castShadow = true; addOutline(ht); group.add(ht);
+  }
+  const wmPosts = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.12, 0.14, 1.3, 6), mat(0x8a6b3f), 10);
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    const px = WINDMILL.x + Math.cos(a) * 8, pz = WINDMILL.z + Math.sin(a) * 8;
+    _dummy.position.set(px, terrainHeight(px, pz) + 0.65, pz);
+    _dummy.rotation.set(0, 0, 0); _dummy.scale.set(1, 1, 1); _dummy.updateMatrix();
+    wmPosts.setMatrixAt(i, _dummy.matrix);
+  }
+  group.add(wmPosts);
+  // Semak pagar (hedge) di tepi barat alun-alun — tanpa collider (seperti
+  // semak biasa: bisa dilewati, menandai batas, bukan tembok).
+  const hedgeSpots = [[4, -34], [4, -32], [4, -30], [4, -28]];
+  const hedges = new THREE.InstancedMesh(new THREE.BoxGeometry(2.2, 0.6, 0.7), mat(0xffffff), hedgeSpots.length);
+  const cHedgeA = new THREE.Color(0x2fbf4a), cHedgeB = new THREE.Color(0x4a8f3c);
+  hedgeSpots.forEach((p, i) => {
+    _dummy.position.set(p[0], terrainHeight(p[0], p[1]) + 0.3, p[1]);
+    _dummy.rotation.set(0, 0, 0); _dummy.scale.set(1, 1, 1); _dummy.updateMatrix();
+    hedges.setMatrixAt(i, _dummy.matrix);
+    hedges.setColorAt(i, cHedgeA.clone().lerp(cHedgeB, ((i * 2654435761) >>> 0) / 4294967296));
+  });
+  hedges.instanceColor.needsUpdate = true;
+  group.add(hedges);
+  // Torii merah (aksen sakura, map-5) mengangkangi jalan ke danau di (29,-31);
+  // rotY -1.03 supaya tiang tegak lurus arah jalan — pemain bisa lewat di bawahnya.
+  const torii = new THREE.Group();
+  const toriiMat = mat(0xc0392b);
+  for (const s of [-1.3, 1.3]) {
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 3.4, 8), toriiMat);
+    pillar.position.set(s, 1.7, 0); pillar.castShadow = true; addOutline(pillar, 1.05); torii.add(pillar);
+    const wx = 29 + s * 0.514, wz = -31 + s * 0.857;
+    colliders.push({ minX: wx - 0.3, maxX: wx + 0.3, minZ: wz - 0.3, maxZ: wz + 0.3 });
+  }
+  const kasagi = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.28, 0.3), toriiMat);
+  kasagi.position.y = 3.5; kasagi.castShadow = true; addOutline(kasagi, 1.04); torii.add(kasagi);
+  const shimaki = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.2, 0.24), toriiMat);
+  shimaki.position.y = 3.1; addOutline(shimaki, 1.04); torii.add(shimaki);
+  const plaque = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.1), mat(0x6e4a26));
+  plaque.position.y = 3.3; torii.add(plaque);
+  torii.position.set(29, terrainHeight(29, -31), -31);
+  torii.rotation.y = -1.03;
+  group.add(torii);
+  // Penanda lokasi tersembunyi (halus: batu + kelopak, tanpa papan besar).
+  const spotStonePos = [
+    [-34, -44], [-32.5, -42.5], [-35.5, -42.8],
+    [70, -66], [71.5, -64.8], [68.8, -64.5],
+    [-96, 28], [-94.5, 29.2], [-97.2, 29.5],
+    [-60, -40], [-58.6, -41.2], [-61.2, -38.8],
+    [-68, 62], [-66.5, 63.2], [-69.3, 60.8],
+  ];
+  const spotStones = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.5, 0), mat(0x8d8578), spotStonePos.length);
+  spotStonePos.forEach((p, i) => {
+    const sc = 0.6 + ((i * 2654435761) >>> 0) / 4294967296 * 0.5;
+    _dummy.position.set(p[0], terrainHeight(p[0], p[1]) + 0.15 * sc, p[1]);
+    _dummy.rotation.set(0, ((i * 40503) % 628) / 100, 0);
+    _dummy.scale.set(sc, sc * 0.55, sc); _dummy.updateMatrix();
+    spotStones.setMatrixAt(i, _dummy.matrix);
+  });
+  _dummy.rotation.set(0, 0, 0);
+  group.add(spotStones);
+  const spotPetals = new THREE.InstancedMesh(new THREE.SphereGeometry(0.13, 6, 5), mat(0xff8fb3), 5);
+  for (let k = 0; k < 5; k++) {
+    const a = (k / 5) * Math.PI * 2;
+    const px = -34 + Math.cos(a) * 1.8, pz = -44 + Math.sin(a) * 1.8;
+    _dummy.position.set(px, terrainHeight(px, pz) + 0.35, pz);
+    _dummy.rotation.set(0, 0, 0); _dummy.scale.set(1, 1, 1); _dummy.updateMatrix();
+    spotPetals.setMatrixAt(k, _dummy.matrix);
+  }
+  group.add(spotPetals);
+  // Sumur tua (lokasi tersembunyi 'old-well', di (-60,-40)): batu + atap.
+  const oldWell = new THREE.Group();
+  const owBase = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.8, 0.8, 8), mat(0x8d8578));
+  owBase.position.y = 0.4; owBase.castShadow = true; addOutline(owBase); oldWell.add(owBase);
+  const owDark = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.1, 8), mat(0x2b2118));
+  owDark.position.y = 0.82; oldWell.add(owDark);
+  for (const s of [-0.65, 0.65]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 1.7, 6), mat(0x6e4a26));
+    post.position.set(s, 0.85, 0); oldWell.add(post);
+  }
+  const owRoof = new THREE.Mesh(new THREE.ConeGeometry(1.05, 0.7, 4), mat(0x8a4a2f));
+  owRoof.position.y = 2.0; owRoof.rotation.y = Math.PI / 4; addOutline(owRoof, 1.04); oldWell.add(owRoof);
+  oldWell.position.set(-60, terrainHeight(-60, -40), -40);
+  group.add(oldWell);
+  colliders.push({ minX: -60.9, maxX: -59.1, minZ: -40.9, maxZ: -39.1 });
+  // Jerami mini di belakang kincir (lokasi 'windmill-back').
+  const wbHay = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 0.7, 8), mat(0xd9a441));
+  wbHay.position.set(-68, terrainHeight(-68, 62) + 0.35, 62); wbHay.castShadow = true; addOutline(wbHay); group.add(wbHay);
+  const wbHayTop = new THREE.Mesh(new THREE.ConeGeometry(1.05, 1.2, 8), mat(0xe8b84a));
+  wbHayTop.position.set(-68, terrainHeight(-68, 62) + 1.25, 62); wbHayTop.castShadow = true; addOutline(wbHayTop); group.add(wbHayTop);
 
   // ---- Matahari + cahaya (anime: matahari emas hangat, hemisphere biru/krem)
   const sun = new THREE.DirectionalLight(0xffc93c, 2.2);
@@ -1210,12 +1600,68 @@ export function buildWorld(scene) {
     group, colliders, water, waterTex, foam, sun, hemi, amb, lamp, crate, crateMesh,
     doorPos, shopPos, penGate, bedroom, minimapData, view,
     counts: { trees: treeSpots.length, fruitTrees, fruits: fruitList.length, houses: 1 + NEW_HOUSES.length },
+    // ---- COZY-B: API cuaca/musim/angin + lokasi tersembunyi (untuk probe
+    // headless via window.__LH_GAME.world.* dan untuk lane F2/migrasi).
+    hiddenSpots: HIDDEN_SPOTS.map((s) => ({ ...s })),
+    get weather() { return weather; },
+    get season() { return season; },
+    get wind() { return { ...wind }; },
+    get rotorSpeed() { return 0.25 + wind.speed * 0.35; },
+    getWeather() { return { weather, season, windSpeed: wind.speed, gust: wind.gust, rain: weatherMix.rain, sunMul: weatherMix.sunMul }; },
+    getSeason() { return season; },
+    // Snapshot lingkungan untuk probe headless (bukan API gameplay).
+    getEnvDebug() {
+      const hex3 = (arr) => {
+        if (!arr) return null;
+        const r = Math.round(arr[0] * 255), g = Math.round(arr[1] * 255), b = Math.round(arr[2] * 255);
+        return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+      };
+      return {
+        weather, season,
+        windSpeed: wind.speed, gust: wind.gust, rainMix: weatherMix.rain,
+        sunI: sun.intensity, fogNear: scene.fog.near, fogFar: scene.fog.far,
+        skyTop: `#${skyUniforms.topColor.value.getHexString()}`,
+        rainVisible: rain.visible, snowVisible: snow.visible,
+        leavesVisible: leaves.visible, petalsVisible: petals.visible,
+        driftVisible: drift.visible,
+        crown0: hex3(crownBlobs.instanceColor?.array.subarray(0, 3)),
+        heroSakura0: heroSakuraBlobs.length ? `#${heroSakuraBlobs[0].mesh.material.color.getHexString()}` : null,
+        terrainCenter: hex3(geo.attributes.color.array.subarray(14620 * 3, 14620 * 3 + 3)),
+        grass0: hex3(grassTufts.instanceColor?.array.subarray(0, 3)),
+        flowersVisible: flowerHeads.visible, fruitsVisible: fruits.visible,
+        rotorAngle: windmillRotor.rotation.z, rotorSpeed: 0.25 + wind.speed * 0.35,
+        flashT, flashNext, // COZY-B: petir (storm) — untuk probe kilat
+        grassX0: grassTufts.instanceMatrix.array[12],
+        counts: { trees: treeSpots.length, houses: 1 + NEW_HOUSES.length },
+      };
+    },
+    setWeather(w) {
+      if (!WEATHER_PRESETS[w]) return weather;
+      weather = w;
+      weatherMix = { ...WEATHER_PRESETS[w] }; // snap — probe/screenshot langsung terlihat
+      weatherTimer = 0;
+      return weather;
+    },
+    setSeason(s) {
+      if (!['spring', 'summer', 'autumn', 'winter'].includes(s)) return season;
+      season = s;
+      applySeasonTerrain();
+      applySeasonCrowns();
+      applySeasonVegetation();
+      return season;
+    },
+    // Cek murni (tanpa efek samping): spot mana yang kena radius dari (px, pz).
+    checkSpots(px, pz, discovered = []) {
+      return HIDDEN_SPOTS.filter((sp) => !discovered.includes(sp.id)
+        && Math.hypot(px - sp.x, pz - sp.z) < sp.r).map((sp) => sp.id);
+    },
     setQuality(q) {
       quality = q || 'medium';
       grassSway = quality !== 'low';
       // Partikel + kupu-kupu mati total di low; update() mengatur sisanya per waktu.
       if (quality === 'low') {
         pollen.visible = false; fireflies.visible = false; petals.visible = false;
+        rain.visible = false; snow.visible = false; leaves.visible = false; drift.visible = false;
         for (const bf of butterflies) bf.group.visible = false;
       } else {
         for (const bf of butterflies) bf.group.visible = true;
@@ -1223,6 +1669,25 @@ export function buildWorld(scene) {
     },
     update(dt, minutes) {
       elapsed += dt;
+      windTime += dt;
+      // ---- COZY-B: angin — SATU envelope per frame (ARCHITECTURE.md §13.7).
+      // Basis cuaca (badai kuat) x hembusan sinus ganda; arah berayun pelan.
+      const wPreset = WEATHER_PRESETS[weather];
+      const kMix = 1 - Math.exp(-dt / 1.2); // transisi cuaca ~3 dtk
+      for (const key of ['sunMul', 'tintK', 'fogMul', 'rain']) {
+        weatherMix[key] += (wPreset[key] - weatherMix[key]) * kMix;
+      }
+      weatherTimer += dt;
+      if (weatherTimer > 50) { // auto-cycle cuaca (setWeather() me-reset timer)
+        weatherTimer = 0;
+        const r = Math.random();
+        weather = r < 0.45 ? 'sunny' : r < 0.7 ? 'cloudy' : r < 0.9 ? 'rain' : 'storm';
+      }
+      wind.gust = 0.5 + 0.5 * Math.sin(windTime * 0.5) * Math.sin(windTime * 0.23 + 1.7);
+      const windBase = weather === 'storm' ? 4.0 : weather === 'rain' ? 2.2 : weather === 'cloudy' ? 1.4 : 1.0;
+      wind.speed = windBase * (0.6 + 0.8 * wind.gust);
+      wind.dir = 0.6 + 0.3 * Math.sin(windTime * 0.07);
+      wind.x = Math.cos(wind.dir); wind.z = Math.sin(wind.dir);
       // Air mengalir (offset tekstur lebih cepat) + riak per-vertex lebih kuat.
       waterTex.offset.y -= dt * 0.3;
       waterTex.offset.x += dt * 0.015;
@@ -1243,37 +1708,50 @@ export function buildWorld(scene) {
         foam.setMatrixAt(i, _dummy.matrix);
       }
       foam.instanceMatrix.needsUpdate = true;
-      // Awan drift pelan ke timur, wrap di tepi.
+      // Awan drift ke timur, didorong angin; mendung = awan membesar/menutupi.
+      const cloudScale = 1 + weatherMix.tintK * 0.35;
       for (let i = 0; i < cloudPuffs.length; i++) {
         const p = cloudPuffs[i];
-        p.x += p.drift * dt;
+        p.x += (p.drift + wind.speed * 0.35) * dt;
         if (p.x > 140) p.x = -140;
         _dummy.position.set(p.x, p.y, p.z);
         _dummy.rotation.set(0, 0, 0);
-        _dummy.scale.set(p.s, p.s * 0.55, p.s * 0.8);
+        _dummy.scale.set(p.s * cloudScale, p.s * 0.55 * cloudScale, p.s * 0.8 * cloudScale);
         _dummy.updateMatrix();
         clouds.setMatrixAt(i, _dummy.matrix);
       }
       clouds.instanceMatrix.needsUpdate = true;
-      // Rumput bergoyang (hanya medium/high).
+      // Rumput bergoyang mengikuti ANGIN (bukan sinus murni): amplitudo +
+      // frekuensi naik dengan wind.speed, arah condong mengikuti wind.x/z.
       if (grassSway) {
+        const swayAmp = 0.05 + 0.025 * wind.speed;
+        const swayFreq = 1.2 + wind.speed * 0.25;
         for (let i = 0; i < grassData.length; i++) {
           const g = grassData[i];
+          const sway = swayAmp * Math.sin(elapsed * swayFreq + g.ph);
           _dummy.position.set(g.x, g.y + 0.25 * g.s, g.z);
-          _dummy.rotation.set(Math.cos(elapsed * 1.3 + g.ph) * 0.08, 0, Math.sin(elapsed * 1.4 + g.ph) * 0.12);
+          _dummy.rotation.set(sway * wind.z, 0, sway * wind.x);
           _dummy.scale.set(g.s, g.s, g.s);
           _dummy.updateMatrix();
           grassTufts.setMatrixAt(i, _dummy.matrix);
         }
         grassTufts.instanceMatrix.needsUpdate = true;
+        // Tajuk pohon bergoyang halus (matriks blob/kerucut ditulis ulang).
+        writeCrownMatrices();
+        for (let h = 0; h < heroSakura.length; h++) {
+          heroSakura[h].rotation.z = Math.sin(elapsed * 1.1 + h * 1.7) * 0.015 * wind.speed;
+        }
       }
-      // Kincir angin berputar pelan (baling-baling menghadap selatan/desa).
-      windmillRotor.rotation.z += dt * 0.6;
-      // Partikel: serbuk sari siang (06:00–18:00), kunang-kunang senja/malam.
+      // Kincir angin: rotor DIDORONG ANGIN (dulu tetap dt*0.6) — tenang ~0.6,
+      // badai ~1.65 rad/dtk. Bendera kincir berkibar mengikuti angin juga.
+      windmillRotor.rotation.z += dt * (0.25 + wind.speed * 0.35);
+      wmFlag.rotation.y = Math.sin(elapsed * 2.2) * 0.3 * (0.4 + wind.speed * 0.3);
+      // Partikel: serbuk sari siang (06:00–18:00, bukan musim dingin),
+      // kunang-kunang senja/malam.
       const rich = quality !== 'low';
       const isDay = minutes >= 360 && minutes < 1080;
       const isNight = minutes >= 1020 || minutes < 360;
-      pollen.visible = rich && isDay;
+      pollen.visible = rich && isDay && season !== 'winter';
       if (pollen.visible) {
         const pp = pollen.geometry.attributes.position;
         for (let i = 0; i < pp.count; i++) {
@@ -1292,20 +1770,75 @@ export function buildWorld(scene) {
         fp.needsUpdate = true;
         fireflies.material.opacity = 0.45 + 0.4 * Math.sin(elapsed * 2.0);
       }
-      // Kelopak sakura: jatuh pelan + melayang ke samping, siang saja.
-      petals.visible = rich && isDay;
+      // Kelopak sakura: jatuh pelan + melayang ke samping, siang saja,
+      // musim semi/panas saja (gugur = daun, dingin = salju). Didorong angin.
+      petals.visible = rich && isDay && (season === 'spring' || season === 'summer');
       if (petals.visible) {
         const pt = petals.geometry.attributes.position;
         for (let i = 0; i < pt.count; i++) {
           let y = pt.getY(i) - dt * (0.35 + (i % 5) * 0.08);
           if (y < 0.4) y = 6.5;
           pt.setY(i, y);
-          pt.setX(i, pt.getX(i) + Math.sin(elapsed * 0.8 + i * 1.3) * dt * 0.4);
+          pt.setX(i, pt.getX(i) + Math.sin(elapsed * 0.8 + i * 1.3) * dt * 0.4 + wind.x * dt * 0.6);
         }
         pt.needsUpdate = true;
       }
+      // COZY-B: daun gugur (musim gugur, siang) — jatuh + hanyut ikut angin.
+      leaves.visible = rich && isDay && season === 'autumn';
+      if (leaves.visible) {
+        const lp = leaves.geometry.attributes.position;
+        for (let i = 0; i < lp.count; i++) {
+          let y = lp.getY(i) - dt * (0.3 + (i % 4) * 0.07);
+          if (y < 0.4) y = 6.5;
+          lp.setY(i, y);
+          lp.setX(i, lp.getX(i) + wind.x * dt * 0.9 + Math.sin(elapsed * 0.7 + i) * dt * 0.3);
+        }
+        lp.needsUpdate = true;
+      }
+      // COZY-B: salju (musim dingin, siang-malam) — jatuh pelan, bergoyang.
+      snow.visible = rich && season === 'winter';
+      if (snow.visible) {
+        const sp = snow.geometry.attributes.position;
+        for (let i = 0; i < sp.count; i++) {
+          let y = sp.getY(i) - dt * (1.0 + (i % 5) * 0.15);
+          if (y < 0.2) y = 24;
+          sp.setY(i, y);
+          sp.setX(i, sp.getX(i) + Math.sin(elapsed * 0.9 + i * 1.1) * dt * 0.5 + wind.x * dt * 0.4);
+        }
+        sp.needsUpdate = true;
+      }
+      // COZY-B: hujan (Points miring terbawa angin; intensitas = weatherMix.rain).
+      rain.visible = rich && weatherMix.rain > 0.05;
+      if (rain.visible) {
+        const rp = rain.geometry.attributes.position;
+        rain.material.opacity = 0.3 + 0.5 * weatherMix.rain;
+        for (let i = 0; i < rp.count; i++) {
+          let y = rp.getY(i) - dt * (18 + weatherMix.rain * 10);
+          if (y < 0) y = 30;
+          rp.setY(i, y);
+          let x = rp.getX(i) + wind.x * dt * 3;
+          if (x > 85) x = -85; if (x < -85) x = 85;
+          rp.setX(i, x);
+        }
+        rp.needsUpdate = true;
+      }
+      // COZY-B: kelopak/daun hanyut di sungai — ikut arus +Z + angin, x selalu
+      // mengikuti riverCenterX(z) supaya tetap di air.
+      drift.visible = rich && isDay && season !== 'winter';
+      if (drift.visible) {
+        const dp = drift.geometry.attributes.position;
+        for (let i = 0; i < dp.count; i++) {
+          const d = driftBase[i];
+          d.z += dt * (0.5 + wind.speed * 0.15) * d.s;
+          if (d.z > 130) d.z = -130;
+          dp.setZ(i, d.z);
+          dp.setX(i, riverCenterX(d.z) + d.off + wind.x * 0.4);
+        }
+        dp.needsUpdate = true;
+      }
       // Kupu-kupu: siang saja, melayang di sekitar kebun, sayap mengepak.
-      const bfOn = rich && minutes >= 420 && minutes < 1020;
+      // Musim dingin tidak ada kupu-kupu.
+      const bfOn = rich && minutes >= 420 && minutes < 1020 && season !== 'winter';
       for (const bf of butterflies) {
         bf.group.visible = bfOn;
         if (!bfOn) continue;
@@ -1326,6 +1859,16 @@ export function buildWorld(scene) {
       sun.position.set(Math.cos(ang) * 70, Math.max(8, elev * 70), 30);
       // Palet waktu: langit, kabut, cahaya, awan.
       const pal = skyAt(minutes);
+      // COZY-B: cuaca menggelapkan + mengabukan palet; musim menggeser langit.
+      pal.top.lerp(_cA.setHex(0x8a94a8), weatherMix.tintK * 0.6);
+      pal.hor.lerp(_cB.setHex(0x8a94a8), weatherMix.tintK * 0.45);
+      pal.fog.lerp(_cA.setHex(0x8a94a8), weatherMix.tintK * 0.4);
+      pal.sunI *= weatherMix.sunMul;
+      if (season === 'winter') { pal.top.lerp(_cA.setHex(0x9fc4e8), 0.3); pal.hor.lerp(_cB.setHex(0xe8eef7), 0.3); }
+      else if (season === 'autumn') pal.hor.lerp(_cA.setHex(0xffd9a0), 0.25);
+      else if (season === 'spring') pal.hor.lerp(_cA.setHex(0xffe3ee), 0.12);
+      scene.fog.near = 90 * weatherMix.fogMul;
+      scene.fog.far = 320 * weatherMix.fogMul;
       skyUniforms.topColor.value.copy(pal.top);
       skyUniforms.horizonColor.value.copy(pal.hor);
       scene.fog.color.copy(pal.fog);
@@ -1339,6 +1882,20 @@ export function buildWorld(scene) {
       const dusk = THREE.MathUtils.clamp((minutes - 1020) / 120, 0, 1); // 17:00-19:00 senja
       lamp.intensity = night ? 30 : dusk > 0.5 ? 15 : 0;
       winMat.emissiveIntensity = night ? 1.6 : dusk > 0 ? 1.0 : 0.25;
+      lanternMat.emissiveIntensity = night ? 1.6 : dusk > 0 ? 1.0 : 0.25; // COZY-B: lampion ikut menyala
+      // COZY-B: petir (storm) — sambaran ganda acak tiap 4–10 dtk: langit +
+      // cahaya memutih sesaat. flashT > 0 = sedang kilat.
+      if (weatherMix.rain > 0.8) {
+        flashNext -= dt;
+        if (flashNext <= 0) { flashT = 0.22; flashNext = 4 + Math.random() * 6; }
+      }
+      if (flashT > 0) {
+        flashT -= dt;
+        const flashK = flashT > 0.11 ? 1 : 0.35; // dua denyut per sambaran
+        skyUniforms.topColor.value.lerp(_cA.setHex(0xffffff), flashK * 0.7);
+        hemi.intensity = pal.hemiI + flashK * 2.2;
+        amb.intensity = pal.ambI + flashK * 0.8;
+      }
       // Matahari bergaris anime: disc + sinar mengikuti arah directional
       // light (di kubah langit, radius 380); malam ganti bulan pucat.
       sunGroup.visible = !night;
@@ -1350,6 +1907,27 @@ export function buildWorld(scene) {
         sunDiscMat.color.copy(pal.sun);
         sunRayMat.color.copy(pal.sun);
         sunRays.rotation.z += dt * 0.12;
+      }
+      // COZY-B: lokasi tersembunyi — dicek tiap frame dari window.__LH_GAME
+      // (world.js tidak menerima referensi game; main.js di luar batas lane
+      // kecuali blok kamera). Hanya saat game berjalan (started).
+      if (typeof window !== 'undefined' && window.__LH_GAME) {
+        const g = window.__LH_GAME;
+        if (g.started && g.state && g.player) {
+          if (!Array.isArray(g.state.discoveredSpots)) g.state.discoveredSpots = [];
+          for (const s of HIDDEN_SPOTS) {
+            if (g.state.discoveredSpots.includes(s.id)) continue;
+            if (Math.hypot(g.player.x - s.x, g.player.z - s.z) < s.r) {
+              g.state.discoveredSpots.push(s.id);
+              if (typeof g.addCoins === 'function') g.addCoins(s.reward);
+              if (g.ui && typeof g.ui.toast === 'function') {
+                g.ui.toast(g.state.lang === 'en'
+                  ? `Hidden spot: ${s.nameEn}  +${s.reward} coins!`
+                  : `Lokasi tersembunyi: ${s.name}  +${s.reward} koin!`);
+              }
+            }
+          }
+        }
       }
     },
   };

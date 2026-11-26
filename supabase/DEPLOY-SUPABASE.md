@@ -1,10 +1,11 @@
 # DEPLOY-SUPABASE — Lembah Hijau (Supabase Edge Function + Postgres)
 
 Migrasi backend dari Cloudflare Workers + D1 ke Supabase. Status file:
-**SIAP, BELUM TER-DEPLOY.** Semua file ada di `supabase/` repo ini
-(belum di-commit — parent yang putuskan commit/push sesudah verifikasi).
-Backend lama (Workers + D1) TIDAK dihapus dan TIDAK diubah; rollback =
-kembalikan `src/cloud.js` lama + hapus meta di bawah (langkah 5).
+**TER-DEPLOY — terverifikasi live 26 Nov 2026** (`curl /api/health` →
+`{"ok":true,"service":"lembah-hijau"}`; game sudah menunjuk ke Edge Function
+via meta di `index.html`). Backend lama (Workers + D1) TIDAK dihapus dan
+TIDAK diubah; rollback = kembalikan client Workers dari git history +
+hapus meta di bawah (langkah 5).
 
 Prasyarat: login dashboard Supabase sebagai CoderMisaki (sudah terverifikasi
 berhasil 21 Nov 2026 via GitHub), project **lembah-hijau**
@@ -79,8 +80,10 @@ Bila health gagal, lihat "Kalau gagal" di bawah SEBELUM lanjut.
 
 ## 5. Sambungkan game ke backend baru
 
-1. Ganti client: `cp supabase/cloud.js src/cloud.js` (timpa yang lama —
-   yang lama tersimpan di git, bisa dikembalikan).
+1. Client SUDAH tersambung (26 Nov 2026): `src/cloud.js` dan
+   `supabase/cloud.js` dijaga IDENTIK — jangan timpa salah satunya tanpa
+   sinkronisasi balik. Langkah lama `cp supabase/cloud.js src/cloud.js`
+   sudah selesai dan tidak perlu diulang.
 2. Di `index.html`, isi 2 meta ini (di `<head>`, ganti nilai anon key
    dari keys file):
    ```html
