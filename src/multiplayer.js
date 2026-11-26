@@ -603,6 +603,272 @@ function groupUsername(av) {
   return av.group.userData.mpUsername || '';
 }
 
+// ---------- COZY-E — Ekonomi multiplayer (orkestrasi client) ----------
+// MpEconomy HANYA mengusulkan dan menampilkan; yang memvalidasi +
+// menerapkan adalah server (Edge Function seksi COZY-E). Client tidak
+// pernah mengubah koin/inventory sendiri dari hasil trade/kunjungan/
+// minigame — semua angka yang diterapkan berasal dari respons server.
+// Broadcast Realtime dipakai untuk MEMBERI TAHU lawan (trade_offer,
+// trade_done, mp_game_*); keputusan ekonomi TIDAK diambil dari broadcast.
+//   available: null = belum tahu, true = endpoint ada, false = 404
+//   (server lama) -> UI menampilkan "segera hadir", game tetap jalan.
+// Minigame bersama: "Panen Cepat" — 20 detik ketuk secepat mungkin;
+// skor dilaporkan ke server, pemenang + hadiah ditentukan server.
+export const MP_ECO_GAME_MS = 20000;
+export const MP_ECO_TRADE_ITEMS = ['carrot', 'tomato', 'pumpkin', 'egg', 'milk'];
+
+export class MpEconomy {
+  constructor(opts = {}) {
+    // getMp() dibaca DINAMIS supaya penggantian instance Multiplayer
+    // (mis. mock headless) langsung dipakai tanpa rebind.
+    this.getMp = opts.getMp || (() => null);
+    this.api = opts.api || null; // {mpGarden, mpTradePropose, ...} dari cloud.js
+    this.getUsername = opts.getUsername || (() => 'Tamu');
+    this.onEvent = opts.onEvent || (() => {});
+    this.available = null;
+    this.pendingOffer = null; // {offerId, to, offer, want} — menunggu jawaban
+    this.incomingOffer = null; // {offerId, from, offer, want} — menunggu saya
+    this.game = null; // {room, endsAt, score, scores, submitted, timer}
+    this._gameTimer = null;
+    this._scoreTimer = null;
+    this._lastSentScore = -1;
+  }
+
+  _broadcast(type, data) {
+    const mp = this.getMp();
+    if (mp && mp.connected) mp.broadcast(type, data);
+  }
+
+  _unavailable(err) {
+    if (err && err.status === 404) {
+      this.available = false;
+      this.onEvent('mp-unavailable', {});
+      return true;
+    }
+    return false;
+  }
+
+  // Cek sekali apakah endpoint mp ada di server ini (dipanggil saat room
+  // dibuka dan ada sesi). 404 -> available=false. Error lain (offline,
+  // 401) -> tetap null supaya dicoba lagi nanti.
+  async probe() {
+    if (!this.api || this.available !== null) return this.available;
+    try {
+      await this.api.mpLeaderboard();
+      this.available = true;
+    } catch (e) {
+      if (e && e.status === 404) {
+        this.available = false;
+        this.onEvent('mp-unavailable', {});
+      }
+    }
+    return this.available;
+  }
+
+  // ---------- Kunjungan kebun ----------
+  // Ambil snapshot publik + klaim hadiah sekali-sehari. Koin yang
+  // diterapkan pemanggil berasal dari respons server (visit.coins).
+  async visitGarden(username) {
+    if (!this.api) throw new Error('no_api');
+    try {
+      const garden = await this.api.mpGarden(username);
+      const visit = await this.api.mpVisit(username);
+      this.available = true;
+      const out = { garden: garden.garden, visit };
+      this.onEvent('garden', out);
+      return out;
+    } catch (e) {
+      if (this._unavailable(e)) throw new Error('mp_unavailable');
+      throw e;
+    }
+  }
+
+  // ---------- Tukar hasil panen ----------
+  async proposeTrade(to, offer, want) {
+    if (!this.api) throw new Error('no_api');
+    try {
+      const res = await this.api.mpTradePropose(to, offer, want);
+      this.available = true;
+      this.pendingOffer = { offerId: res.offerId, to, offer, want };
+      this._broadcast('trade_offer', {
+        offerId: res.offerId, from: this.getUsername(), offer, want,
+      });
+      this.onEvent('trade-sent', { ...this.pendingOffer });
+      return res;
+    } catch (e) {
+      if (this._unavailable(e)) throw new Error('mp_unavailable');
+      throw e;
+    }
+  }
+
+  async acceptTrade(offerId) {
+    if (!this.api) throw new Error('no_api');
+    try {
+      const done = this.incomingOffer;
+      const res = await this.api.mpTradeAccept(offerId);
+      this.available = true;
+      this.incomingOffer = null;
+      this._broadcast('trade_done', {
+        offerId, by: this.getUsername(),
+        // Relay nilai server (dari respons accept): inv/koin pengusul
+        // sesudah swap, supaya ia menerapkan segera (lihat trade-done-remote).
+        peerInv: res.peerInv, peerCoins: res.peerCoins,
+      });
+      this.onEvent('trade-done', { offerId, inv: res.inv, coins: res.coins, offer: done });
+      return res;
+    } catch (e) {
+      if (this._unavailable(e)) throw new Error('mp_unavailable');
+      throw e;
+    }
+  }
+
+  async declineTrade(offerId) {
+    if (!this.api) throw new Error('no_api');
+    try {
+      const done = this.incomingOffer;
+      const res = await this.api.mpTradeDecline(offerId);
+      this.incomingOffer = null;
+      this._broadcast('trade_declined', { offerId, by: this.getUsername() });
+      this.onEvent('trade-declined', { offerId, offer: done });
+      return res;
+    } catch (e) {
+      if (this._unavailable(e)) throw new Error('mp_unavailable');
+      throw e;
+    }
+  }
+
+  // ---------- Minigame bersama: "Panen Cepat" (20 detik) ----------
+  startMinigame(room) {
+    const endsAt = Date.now() + MP_ECO_GAME_MS;
+    this._broadcast('mp_game_start', { room, by: this.getUsername(), endsAt });
+    this._beginGame(room, endsAt);
+    return endsAt;
+  }
+
+  _beginGame(room, endsAt) {
+    this._clearGameTimers();
+    this.game = { room, endsAt, score: 0, scores: {}, submitted: false };
+    this._lastSentScore = -1;
+    this.onEvent('game-started', { room, endsAt });
+    this._scoreTimer = setInterval(() => {
+      if (this.game && this.game.score !== this._lastSentScore) {
+        this._lastSentScore = this.game.score;
+        this._broadcast('mp_game_score', { room, from: this.getUsername(), score: this.game.score });
+      }
+    }, 2000);
+    this._gameTimer = setTimeout(() => { this.endMinigame(); }, Math.max(0, endsAt - Date.now()));
+  }
+
+  // Satu ketukan = 1 panen. Dipanggil UI saat tombol ditekan.
+  tapGame() {
+    if (!this.game) return 0;
+    this.game.score += 1;
+    return this.game.score;
+  }
+
+  async endMinigame() {
+    const g = this.game;
+    if (!g || g.submitted) return null;
+    g.submitted = true;
+    this._clearGameTimers();
+    const score = g.score;
+    let results = null;
+    let claim = null;
+    try {
+      await this.api.mpMinigameSubmit(g.room, score);
+      results = await this.api.mpMinigameResults(g.room);
+      const me = this.getUsername();
+      if (results && results.winner === me) {
+        claim = await this.api.mpMinigameClaim(g.room);
+      }
+      this.available = true;
+    } catch (e) {
+      if (this._unavailable(e)) {
+        this.onEvent('game-ended', { room: g.room, score, unavailable: true });
+        this.game = null;
+        return null;
+      }
+      // Gagal jaringan di akhir ronde: skor lokal tetap dilaporkan apa
+      // adanya; hadiah tidak diklaim (server yang memutuskan).
+      this.onEvent('game-ended', { room: g.room, score, error: String((e && e.message) || e) });
+      this.game = null;
+      return null;
+    }
+    const out = {
+      room: g.room, score, scores: results ? results.scores : [],
+      winner: results ? results.winner : null,
+      reward: claim && !claim.already ? claim.reward : 0,
+      coins: claim ? claim.coins : null,
+    };
+    this._broadcast('mp_game_end', { room: g.room, winner: out.winner, scores: out.scores });
+    this.onEvent('game-ended', out);
+    this.game = null;
+    return out;
+  }
+
+  _clearGameTimers() {
+    if (this._gameTimer) { clearTimeout(this._gameTimer); this._gameTimer = null; }
+    if (this._scoreTimer) { clearInterval(this._scoreTimer); this._scoreTimer = null; }
+  }
+
+  // ---------- Peringkat ----------
+  async loadLeaderboard() {
+    if (!this.api) throw new Error('no_api');
+    try {
+      const res = await this.api.mpLeaderboard();
+      this.available = true;
+      this.onEvent('leaderboard', { board: res.board || [] });
+      return res.board || [];
+    } catch (e) {
+      if (this._unavailable(e)) throw new Error('mp_unavailable');
+      throw e;
+    }
+  }
+
+  // ---------- Broadcast masuk (dipanggil main.js dari mp.onEvent) ----------
+  // Broadcast HANYA pemberitahuan; tidak ada angka ekonomi yang diambil
+  // dari sini — angka selalu dari respons server (accept/visit/claim).
+  handleBroadcast(type, data) {
+    const me = this.getUsername();
+    if (type === 'trade_offer') {
+      if (!data || data.from === me || !data.offerId) return;
+      this.incomingOffer = {
+        offerId: data.offerId, from: data.from, offer: data.offer, want: data.want,
+      };
+      this.onEvent('trade-offer', { ...this.incomingOffer });
+    } else if (type === 'trade_done') {
+      if (!data || !data.offerId) return;
+      if (this.pendingOffer && this.pendingOffer.offerId === data.offerId) {
+        const done = this.pendingOffer;
+        this.pendingOffer = null;
+        this.onEvent('trade-done-remote', {
+          ...done, by: data.by, peerInv: data.peerInv, peerCoins: data.peerCoins,
+        });
+      }
+    } else if (type === 'trade_declined') {
+      if (!data || !data.offerId) return;
+      if (this.pendingOffer && this.pendingOffer.offerId === data.offerId) {
+        const done = this.pendingOffer;
+        this.pendingOffer = null;
+        this.onEvent('trade-declined-remote', { ...done, by: data.by });
+      }
+    } else if (type === 'mp_game_start') {
+      if (!data || data.by === me || !data.room || !data.endsAt) return;
+      if (!this.game) this._beginGame(data.room, data.endsAt);
+    } else if (type === 'mp_game_score') {
+      if (!data || data.from === me || !this.game || data.room !== this.game.room) return;
+      this.game.scores[data.from] = data.score;
+      this.onEvent('game-score', { from: data.from, score: data.score, room: data.room });
+    } else if (type === 'mp_game_end') {
+      if (!data || !this.game || data.room !== this.game.room) return;
+      this.onEvent('game-ended-remote', {
+        room: data.room, winner: data.winner, scores: data.scores || [],
+      });
+    }
+  }
+}
+// COZY-E — end
+
 function disposeSprite(sprite) {
   if (!sprite) return;
   if (sprite.material?.map) sprite.material.map.dispose();

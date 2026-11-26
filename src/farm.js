@@ -1,14 +1,25 @@
 // farm.js — petak kebun grid + tanaman 3 tahap tumbuh.
-// 3 tanaman: Wortel (2 hari, benih 4, jual 12), Tomat (3 hari, 8, 20),
-// Labu (4 hari, 14, 32). Tahap visual 0-3 berbeda tiap tahap.
+// COZY-C: 5 tanaman (Wortel, Tomat, Labu + Gandum, Stroberi), kualitas
+// panen (normal/bagus/langka, roll dipengaruhi tanah + pupuk), pupuk +
+// kualitas tanah per petak, dan 4 pohon buah perennial (apel/jeruk) di
+// sekitar kebun buah (48,48) — ditanam dari bibit, berbuah tiap hari.
+// Harga jual tanaman dibaca economy.js dari CROPS ini (single source).
 import * as THREE from 'three';
 import { terrainHeight } from './physics.js';
 import { FARM_ORIGIN, FARM_COLS, FARM_ROWS, FARM_SPACING, toonMat, addOutline } from './world.js';
+import {
+  SOIL_DEFAULT, SOIL_FERTILISE_GAIN, SOIL_HARVEST_COST,
+  TREE_SPOTS, TREE_DEFS, TREE_MATURE_DAYS, TREE_FRUIT_MAX,
+  rollQuality, addQuality,
+} from './economy.js';
 
 export const CROPS = {
   carrot:  { id: 'carrot',  name: 'Wortel', icon: 'carrot', days: 2, seed: 4,  sell: 12, color: 0xe87a2a, seedKey: 'carrotSeed' },
   tomato:  { id: 'tomato',  name: 'Tomat',  icon: 'tomato', days: 3, seed: 8,  sell: 20, color: 0xd9382b, seedKey: 'tomatoSeed' },
   pumpkin: { id: 'pumpkin', name: 'Labu',   icon: 'pumpkin', days: 4, seed: 14, sell: 32, color: 0xe8912a, seedKey: 'pumpkinSeed' },
+  // COZY-C: Gandum (bahan tepung) + Stroberi (tanaman ke-5).
+  wheat:      { id: 'wheat',      name: 'Gandum',    icon: 'wheat',    days: 3, seed: 6,  sell: 14, color: 0xd9b64a, seedKey: 'wheatSeed' },
+  strawberry: { id: 'strawberry', name: 'Stroberi',  icon: 'tomato',   days: 4, seed: 12, sell: 30, color: 0xe84a6f, seedKey: 'strawberrySeed' },
 };
 
 export function plotPos(ix, iz) {
@@ -20,14 +31,26 @@ export function isValidPlot(ix, iz) { return ix >= 0 && ix < FARM_COLS && iz >= 
 function mat(color, opts = {}) { return toonMat(color, opts); }
 
 export class Farm {
-  constructor(scene, plotsState) {
+  constructor(scene, plotsState, treesState = null) {
     this.scene = scene;
-    this.plots = plotsState; // [{crop, growth, watered, hoed}]
+    this.plots = plotsState; // [{crop, growth, watered, hoed, soil, fert}]
+    // COZY-C: petak dari save lama tidak punya soil/fert -> default di sini
+    // (save v2 lama tetap bisa dimuat; buildSaveData menulis keduanya).
+    for (const p of this.plots) {
+      if (typeof p.soil !== 'number') p.soil = SOIL_DEFAULT;
+      if (typeof p.fert !== 'boolean') p.fert = false;
+    }
+    // COZY-C: pohon buah — state milik Game (state.trees), mesh milik Farm.
+    this.trees = treesState;
     this.group = new THREE.Group();
     scene.add(this.group);
     this.soilMat = mat(0x6e4a26);
     this.soilHoedMat = mat(0x4a2f16);
     this.wetMat = mat(0x3a2410);
+    // COZY-C: warna tanah per petak mengikuti kualitas tanah (0 = pucat
+    // kehabisan unsur, 100 = cokelat gelap subur) — perlu material per
+    // petak, bukan satu material bersama.
+    this.soilMats = [];
     this.plotMeshes = [];
     this.cropMeshes = [];
     for (let iz = 0; iz < FARM_ROWS; iz++) {
@@ -35,10 +58,12 @@ export class Farm {
         const idx = plotIndex(ix, iz);
         const p = plotPos(ix, iz);
         const y = terrainHeight(p.x, p.z);
-        const soil = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.3, 2.3), this.soilMat.clone());
+        const soilMat = this.soilMat.clone();
+        const soil = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.3, 2.3), soilMat);
         soil.position.set(p.x, y + 0.12, p.z);
         soil.receiveShadow = true;
         this.group.add(soil);
+        this.soilMats[idx] = soilMat;
         this.plotMeshes[idx] = soil;
         // Visual tanaman per petak (dibangun ulang tiap perubahan state).
         const cropGroup = new THREE.Group();
@@ -48,6 +73,20 @@ export class Farm {
       }
     }
     this.refreshAll();
+    // COZY-C: pohon buah — 4 titik tetap di sekitar kebun buah. Collider
+    // batang (AABB) diekspos sebagai this.treeColliders untuk main.js.
+    this.treeGroups = [];
+    this.treeColliders = [];
+    for (let i = 0; i < TREE_SPOTS.length; i++) {
+      const s = TREE_SPOTS[i];
+      const y = terrainHeight(s.x, s.z);
+      const g = new THREE.Group();
+      g.position.set(s.x, y, s.z);
+      this.group.add(g);
+      this.treeGroups[i] = g;
+      this.treeColliders.push({ minX: s.x - 0.6, maxX: s.x + 0.6, minZ: s.z - 0.6, maxZ: s.z + 0.6 });
+      this.refreshTree(i);
+    }
     // Orang-orangan sawah di sudut kebun (dekoratif, tanpa collider).
     const sc = new THREE.Group();
     const scX = FARM_ORIGIN.x + (FARM_COLS - 1) * FARM_SPACING + 1.4;
@@ -76,9 +115,21 @@ export class Farm {
   refreshPlot(idx) {
     const plot = this.plots[idx];
     const soil = this.plotMeshes[idx];
-    soil.material = plot.watered ? this.wetMat : (plot.hoed ? this.soilHoedMat : this.soilMat);
+    // COZY-C: warna tanah = lerp pucat (soil 0) -> subur (soil 100);
+    // disiram = tetap gelap basah. Pupuk = penanda kerucut emas di sudut.
+    if (plot.watered) soil.material = this.wetMat;
+    else {
+      soil.material = this.soilMats[idx];
+      const k = Math.max(0, Math.min(100, plot.soil ?? SOIL_DEFAULT)) / 100;
+      soil.material.color.setHex(0x8a6a44).lerp(new THREE.Color(0x4a2f16), k);
+    }
     const cg = this.cropMeshes[idx];
     while (cg.children.length) cg.remove(cg.children[0]);
+    if (plot.fert) {
+      const flag = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.4, 6), mat(0xffd54f, { emissive: 0x664411 }));
+      flag.position.set(0.95, 0.2, 0.95);
+      cg.add(flag);
+    }
     if (!plot.crop) return;
     const stage = this.stageOf(plot);
     const crop = CROPS[plot.crop];
@@ -106,6 +157,21 @@ export class Farm {
         for (let i = 0; i < 3; i++) {
           const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.2 * s, 8, 8), mat(crop.color));
           fruit.position.set(Math.cos(i * 2.1) * 0.25, 0.35 * s, Math.sin(i * 2.1) * 0.25);
+          cg.add(fruit);
+        }
+      } else if (plot.crop === 'wheat') {
+        // COZY-C: gandum — 5 batang emas ramping, tanpa buah bulat.
+        for (let i = 0; i < 5; i++) {
+          const stalk = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.85 * s, 5), mat(crop.color));
+          const a = (i / 5) * Math.PI * 2;
+          stalk.position.set(Math.cos(a) * 0.22, 0.45 * s, Math.sin(a) * 0.22);
+          cg.add(stalk);
+        }
+      } else if (plot.crop === 'strawberry') {
+        // COZY-C: stroberi — 4 buah kecil merah muda di antara daun.
+        for (let i = 0; i < 4; i++) {
+          const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.13 * s, 8, 8), mat(crop.color));
+          fruit.position.set(Math.cos(i * 1.57) * 0.28, 0.22 * s, Math.sin(i * 1.57) * 0.28);
           cg.add(fruit);
         }
       } else {
@@ -143,23 +209,135 @@ export class Farm {
     if (!p.crop || p.watered || this.isReady(p)) return false;
     p.watered = true; this.refreshPlot(plotIndex(ix, iz)); return true;
   }
-  harvestAt(ix, iz, inv) {
+  // COZY-C: pupuk 1 petak. Butuh 1 pupuk di inventaris. Tanah +25 (maks
+  // 100); bila ada tanaman, petak jadi 'fert' untuk siklus ini (tumbuh
+  // lebih cepat + peluang kualitas naik). Petak kosong pun bisa dipupuk
+  // (memulihkan tanah). Kembalikan false bila tidak ada pupuk / petak
+  // tidak dicangkul.
+  fertiliseAt(ix, iz, inv) {
+    if (!isValidPlot(ix, iz)) return false;
+    const p = this.plots[plotIndex(ix, iz)];
+    if (!p.hoed) return false;
+    if ((inv.fertiliser || 0) < 1) return false;
+    inv.fertiliser -= 1;
+    p.soil = Math.min(100, (p.soil ?? SOIL_DEFAULT) + SOIL_FERTILISE_GAIN);
+    if (p.crop) p.fert = true;
+    this.refreshPlot(plotIndex(ix, iz)); return true;
+  }
+  harvestAt(ix, iz, inv, invQ) {
     if (!isValidPlot(ix, iz)) return false;
     const idx = plotIndex(ix, iz);
     const p = this.plots[idx];
     if (!p.crop || !this.isReady(p)) return false;
+    // COZY-C: roll kualitas dari tanah + pupuk; tanah terkuras -15 tiap panen.
+    const quality = rollQuality(Math.random(), p.soil ?? SOIL_DEFAULT, !!p.fert);
     inv[p.crop] = (inv[p.crop] || 0) + 1;
-    const harvested = p.crop;
-    p.crop = null; p.growth = 0; p.watered = false; p.hoed = false;
+    if (invQ) addQuality(invQ, p.crop, quality, 1);
+    const harvested = { crop: p.crop, quality };
+    p.crop = null; p.growth = 0; p.watered = false; p.hoed = false; p.fert = false;
+    p.soil = Math.max(0, (p.soil ?? SOIL_DEFAULT) - SOIL_HARVEST_COST);
     this.refreshPlot(idx); return harvested;
   }
-  // Dipanggil saat tidur / ganti hari: tanaman yang disiram tumbuh 1 hari.
+  // ---- Pohon buah (COZY-C) ----
+  // refreshTree(i): bangun ulang mesh pohon dari state.trees[i].
+  // kind null = titik kosong (tanda tanah kecil saja); growth 0-1 = bibit/
+  // muda; growth >= 2 = dewasa + buah (fruit bola di tajuk).
+  refreshTree(i) {
+    if (!this.trees) return;
+    const g = this.treeGroups[i];
+    if (!g) return;
+    while (g.children.length) g.remove(g.children[0]);
+    const tr = this.trees[i];
+    const spot = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.0, 0.25, 8), mat(0x6e4a26));
+    spot.position.y = 0.12; g.add(spot);
+    if (!tr || !tr.kind) return;
+    const def = TREE_DEFS[tr.kind];
+    if (tr.growth < 1) {
+      // Bibit: 3 kecambah kecil.
+      for (let k = 0; k < 3; k++) {
+        const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.5, 5), mat(0x66bb6a));
+        const a = (k / 3) * Math.PI * 2;
+        leaf.position.set(Math.cos(a) * 0.2, 0.4, Math.sin(a) * 0.2);
+        g.add(leaf);
+      }
+      return;
+    }
+    const s = tr.growth < TREE_MATURE_DAYS ? 0.6 : 1;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18 * s, 0.26 * s, 1.4 * s, 6), mat(0x6e4a26));
+    trunk.position.y = 0.7 * s; addOutline(trunk); g.add(trunk);
+    const crown = new THREE.Mesh(new THREE.SphereGeometry(1.05 * s, 10, 8), mat(def.leafColor));
+    crown.position.y = 1.9 * s; crown.scale.y = 0.85; addOutline(crown); g.add(crown);
+    for (let f = 0; f < (tr.fruit || 0); f++) {
+      const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), mat(def.fruitColor));
+      const a = (f / Math.max(1, tr.fruit)) * Math.PI * 2;
+      fruit.position.set(Math.cos(a) * 0.8 * s, (1.6 + (f % 2) * 0.4) * s, Math.sin(a) * 0.8 * s);
+      g.add(fruit);
+    }
+  }
+  refreshTrees() { for (let i = 0; i < TREE_SPOTS.length; i++) this.refreshTree(i); }
+  nearestTree(x, z, maxDist = 2.6) {
+    let best = -1, bestD = maxDist;
+    for (let i = 0; i < TREE_SPOTS.length; i++) {
+      const d = Math.hypot(TREE_SPOTS[i].x - x, TREE_SPOTS[i].z - z);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
+  // Tanam bibit di titik kosong. Bibit dibeli di toko (appleSapling /
+  // orangeSapling). Pohon tumbuh +1/hari otomatis (tanpa siram).
+  plantTree(i, kind, inv) {
+    if (!this.trees || i < 0 || i >= TREE_SPOTS.length) return false;
+    const tr = this.trees[i];
+    if (tr.kind) return false;
+    if (kind !== 'apple' && kind !== 'orange') return false;
+    const key = kind === 'apple' ? 'appleSapling' : 'orangeSapling';
+    if ((inv[key] || 0) < 1) return false;
+    inv[key] -= 1;
+    tr.kind = kind; tr.growth = 0; tr.fruit = 0;
+    this.refreshTree(i); return true;
+  }
+  // Panen semua buah matang di satu pohon (tiap buah roll kualitas sendiri).
+  harvestTree(i, inv, invQ) {
+    if (!this.trees || i < 0 || i >= TREE_SPOTS.length) return 0;
+    const tr = this.trees[i];
+    if (!tr.kind || tr.growth < TREE_MATURE_DAYS || (tr.fruit || 0) < 1) return 0;
+    const n = tr.fruit;
+    const qualities = [];
+    for (let f = 0; f < n; f++) {
+      // Pohon tidak dipupuk: roll dari tanah subur tetap (soil 80).
+      const q = rollQuality(Math.random(), SOIL_DEFAULT, false);
+      qualities.push(q);
+      if (invQ) addQuality(invQ, tr.kind, q, 1);
+    }
+    inv[tr.kind] = (inv[tr.kind] || 0) + n;
+    tr.fruit = 0;
+    this.refreshTree(i);
+    return { kind: tr.kind, count: n, qualities };
+  }
+  treeIsReady(i) {
+    if (!this.trees || i < 0 || i >= TREE_SPOTS.length) return false;
+    const tr = this.trees[i];
+    return !!tr.kind && tr.growth >= TREE_MATURE_DAYS && (tr.fruit || 0) > 0;
+  }
+  // Dipanggil saat tidur / ganti hari: tanaman yang disiram tumbuh 1 hari
+  // (dipupuk + disiram = 2 hari); pohon tumbuh +1 dan berbuah +1/hari.
   growDay() {
     for (let i = 0; i < this.plots.length; i++) {
       const p = this.plots[i];
-      if (p.crop && p.watered && p.growth < CROPS[p.crop].days) p.growth += 1;
+      if (p.crop && p.watered && p.growth < CROPS[p.crop].days) {
+        p.growth = Math.min(CROPS[p.crop].days, p.growth + (p.fert ? 2 : 1));
+      }
       p.watered = false;
       this.refreshPlot(i);
+    }
+    if (this.trees) {
+      for (let i = 0; i < this.trees.length; i++) {
+        const tr = this.trees[i];
+        if (!tr.kind) continue;
+        if (tr.growth < TREE_MATURE_DAYS) tr.growth += 1;
+        else if ((tr.fruit || 0) < TREE_FRUIT_MAX) tr.fruit += 1;
+        this.refreshTree(i);
+      }
     }
   }
   nearestPlot(x, z, maxDist = 2.6) {

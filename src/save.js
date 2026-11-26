@@ -20,12 +20,70 @@ export function buildSaveData(state) {
     lang: state.lang, gender: state.gender, sound: state.sound, quality: state.quality,
     custom: sanitizeCustom(state.custom, state.gender),
     inv: state.inv,
+    // COZY-C (additive, v2 tetap): kualitas inventaris {item:{good,rare}},
+    // pohon buah, cooldown mesin, dan tanah/pupuk per petak. F2 menambahkan
+    // semuanya ke allowlist server (validateSave) + migrasi v3.
+    invQ: state.invQ || {},
+    trees: Array.isArray(state.trees)
+      ? state.trees.map((tr) => ({ kind: tr.kind || null, growth: tr.growth || 0, fruit: tr.fruit || 0 })).slice(0, 4)
+      : [],
+    machineCooldown: state.machineCooldown || 0,
     // Lokasi tersembunyi yang sudah ditemukan (sekali per save) — tanpa ini
     // hadiah spot terbit ulang tiap reload (duplikasi koin, Wave-1).
     discoveredSpots: Array.isArray(state.discoveredSpots)
       ? state.discoveredSpots.filter((s) => typeof s === 'string').slice(0, 32)
       : [],
-    plots: state.plots.map((p) => ({ crop: p.crop, growth: p.growth, watered: p.watered, hoed: p.hoed })),
+    // COZY-D — NPC + Sosial (Lane D, aditif; v2 tetap, F2 menambahkan ke
+    // allowlist server v3): pertemanan, hadiah harian, quest, festival.
+    // inv sudah ditulis utuh di atas, jadi kunci baru 'goldenEgg' ikut.
+    npcFriendship: (state.npcFriendship && typeof state.npcFriendship === 'object')
+      ? Object.fromEntries(Object.entries(state.npcFriendship)
+          .filter(([k, v]) => typeof k === 'string' && Number.isFinite(v))
+          .map(([k, v]) => [k, Math.max(0, Math.min(999, Math.floor(v)))]))
+      : {},
+    npcGiftedDay: (state.npcGiftedDay && typeof state.npcGiftedDay === 'object')
+      ? Object.fromEntries(Object.entries(state.npcGiftedDay)
+          .filter(([k, v]) => typeof k === 'string' && Number.isFinite(v))
+          .map(([k, v]) => [k, Math.floor(v)]))
+      : {},
+    npcMet: (state.npcMet && typeof state.npcMet === 'object')
+      ? Object.fromEntries(Object.entries(state.npcMet)
+          .filter(([k, v]) => typeof k === 'string' && v === true))
+      : {},
+    npcQuests: (state.npcQuests && Array.isArray(state.npcQuests.daily)
+        && Array.isArray(state.npcQuests.weekly))
+      ? {
+          day: Math.floor(state.npcQuests.day || 1),
+          week: Math.floor(state.npcQuests.week || 0),
+          daily: state.npcQuests.daily.map((q) => ({ id: String(q.id), progress: Math.max(0, Math.floor(q.progress || 0)), done: !!q.done })).slice(0, 8),
+          weekly: state.npcQuests.weekly.map((q) => ({ id: String(q.id), progress: Math.max(0, Math.floor(q.progress || 0)), done: !!q.done })).slice(0, 8),
+          weekGiftNpcs: Array.isArray(state.npcQuests.weekGiftNpcs)
+            ? state.npcQuests.weekGiftNpcs.filter((s) => typeof s === 'string').slice(0, 16) : [],
+        }
+      : null,
+    npcFestival: (state.npcFestival && typeof state.npcFestival === 'object' && Number.isFinite(state.npcFestival.day))
+      ? {
+          day: Math.floor(state.npcFestival.day),
+          talked: Object.fromEntries(Object.entries(state.npcFestival.talked || {})
+            .filter(([k, v]) => typeof k === 'string' && v === true)),
+          harvested: Math.max(0, Math.floor(state.npcFestival.harvested || 0)),
+          rewarded: !!state.npcFestival.rewarded,
+        }
+      : null,
+    // COZY-D — end
+    // COZY-E — start: ekonomi multiplayer (aditif; server validateSave
+    // clean BELUM mengenal field ini — F2 menambahkan ke allowlist.
+    // Sampai itu ada, cloud round-trip memangkasnya seperti discoveredSpots
+    // sebelum Wave-1; save lokal tetap utuh.)
+    mpVisits: (state.mpVisits && typeof state.mpVisits === 'object' && !Array.isArray(state.mpVisits))
+      ? Object.fromEntries(Object.entries(state.mpVisits)
+        .filter(([k, v]) => /^[a-z0-9_]{3,16}$/.test(k) && /^\d{4}-\d{2}-\d{2}$/.test(String(v))).slice(0, 64))
+      : {},
+    mpTrades: Array.isArray(state.mpTrades) ? state.mpTrades.slice(0, 20) : [],
+    mpMinigameBest: Number.isInteger(state.mpMinigameBest) && state.mpMinigameBest >= 0 ? state.mpMinigameBest : 0,
+    // COZY-E — end
+    plots: state.plots.map((p) => ({ crop: p.crop, growth: p.growth, watered: p.watered, hoed: p.hoed,
+      soil: p.soil ?? 80, fert: !!p.fert })),
     animals: state.animals,
     player: { x: state.playerX, z: state.playerZ },
   };

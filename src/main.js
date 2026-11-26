@@ -14,20 +14,38 @@ import { Input } from './input.js';
 import { DynamicBox, terrainHeight, riverDistance, smoothstep } from './physics.js';
 import { attachDebug } from './debug.js';
 import { defaultCustom, sanitizeCustom } from './customization.js';
+// COZY-C — start: ekonomi baru (farm + pasar + olah). economy.js = satu
+// sumber harga; farm.js menyediakan pohon buah + pupuk + kualitas panen.
+import {
+  RECIPES, FERTILISER, SAPLINGS, MACHINE_COOLDOWN_MS,
+  demandFor, sellPrice, computeSellAll, itemName,
+  sanitizeInvQ, sanitizeTrees, defaultTrees, takeUnit, craftBonus, bestUnit,
+  buildMachine, rollQuality, addQuality,
+} from './economy.js';
+import { toonMat, addOutline } from './world.js';
+// COZY-C — end
 // Pasar malam + multiplayer (23 Nov 2026): zona, 8 game berhadiah, wahana,
 // jajanan, room online via Supabase Realtime (ephemeral, tanpa tabel baru).
 import { buildNightMarketZone, NM_RECT } from './nm-zone.js';
 import { buildNightMarketGames } from './nm-games.js';
 import { buildNightMarketRides } from './nm-rides.js';
 import { buildNightMarketFood } from './nm-food.js';
-import { Multiplayer } from './multiplayer.js';
+import { Multiplayer, MpEconomy } from './multiplayer.js';
 import { NmInvite } from './nm-invite.js';
 import { createBots } from './nm-bots.js';
+// COZY-D — NPC + Sosial (Lane D): manajer warga desa, dialog, quest,
+// pedagang keliling, festival. Satu blok import saja; wiring di bawah.
+import { NpcManager } from './npc.js';
 import {
   getSession, setSession, clearSession, hasPending, markPending, clearPending,
   validateUsername, validatePin, normalizeUsername,
   register as cloudRegister, login as cloudLogin, logout as cloudLogout,
   cloudGetSave, cloudPutSave, cloudDeleteSave, cloudHealth,
+  // COZY-E — start: API ekonomi multiplayer (server-validated).
+  mpGarden, mpTradePropose, mpTradeAccept, mpTradeDecline, mpVisit,
+  mpMinigameSubmit, mpMinigameResults, mpMinigameClaim, mpLeaderboard,
+  isMpUnavailable,
+  // COZY-E — end
 } from './cloud.js';
 
 // Alias fungsi i18n t(): loop() mendeklarasikan variabel lokal `t` (elapsed
@@ -62,9 +80,31 @@ function defaultState() {
     custom: defaultCustom('male'),
     username: null, updatedAt: 0,
     inv: { carrotSeed: 0, tomatoSeed: 0, pumpkinSeed: 0, feed: 0,
-           carrot: 0, tomato: 0, pumpkin: 0, egg: 0, milk: 0 },
+           carrot: 0, tomato: 0, pumpkin: 0, egg: 0, milk: 0,
+           // COZY-C: benih + hasil baru (gandum/stroberi/buah/olahan/pupuk/bibit).
+           wheatSeed: 0, strawberrySeed: 0, wheat: 0, strawberry: 0,
+           apple: 0, orange: 0, cheese: 0, sauce: 0, flour: 0,
+           fertiliser: 0, appleSapling: 0, orangeSapling: 0, goldenEgg: 0 },
     plots, animals, playerX: 6, playerZ: 20, // spawn pembuka: selatan kebun/kandang,
     discoveredSpots: [], // id lokasi tersembunyi yang sudah memberi hadiah
+    // COZY-C — start: kualitas inventaris {item:{good,rare}} (inv = total),
+    // pohon buah (4 titik), cooldown mesin pengolah (epoch ms, 0 = siap).
+    invQ: {},
+    trees: defaultTrees(),
+    machineCooldown: 0,
+    // COZY-C — end
+    // COZY-D — NPC + Sosial (Lane D, aditif; SAVE_VERSION tetap 2):
+    // pertemanan {id: poin}, hari terakhir beri hadiah {id: hari},
+    // warga yang sudah disapa {id: true}, quest, status festival.
+    npcFriendship: {}, npcGiftedDay: {}, npcMet: {},
+    npcQuests: null, // diisi NpcManager (freshQuests) bila null
+    npcFestival: null, // diisi NpcManager per hari festival bila null
+    // COZY-E — start: ekonomi multiplayer (aditif, SAVE_VERSION tetap 2;
+    // F2 menambahkan ketiganya ke validateSave clean + migrasi v3).
+    mpVisits: {}, // {usernameKebun: 'YYYY-MM-DD'} kunjungan berhadiah terakhir (cermin lokal; server berwenang)
+    mpTrades: [], // [{id, with, give:{item,qty}, get:{item,qty}, at}] maks 20, terbaru dulu
+    mpMinigameBest: 0, // skor terbaik "Panen Cepat" bersama
+    // COZY-E — end
     // kamera awal membingkai petak kebun (timur) + kandang (barat) + sungai + pegunungan (utara)
   };
 }
@@ -84,6 +124,26 @@ class Game {
         discoveredSpots: Array.isArray(saved.discoveredSpots)
           ? saved.discoveredSpots.filter((s) => typeof s === 'string')
           : [],
+        // COZY-C — start: pulihkan field ekonomi baru (absen di save lama =
+        // default; sanitizeTrees/invQ memotong nilai liar).
+        invQ: sanitizeInvQ(saved.invQ || {}, { ...this.state.inv, ...(saved.inv || {}) }),
+        trees: sanitizeTrees(saved.trees),
+        machineCooldown: typeof saved.machineCooldown === 'number' ? saved.machineCooldown : 0,
+        // COZY-C — end
+        // COZY-D — NPC + Sosial: pulihkan aditif (save lama = kosong).
+        npcFriendship: (saved.npcFriendship && typeof saved.npcFriendship === 'object') ? saved.npcFriendship : {},
+        npcGiftedDay: (saved.npcGiftedDay && typeof saved.npcGiftedDay === 'object') ? saved.npcGiftedDay : {},
+        npcMet: (saved.npcMet && typeof saved.npcMet === 'object') ? saved.npcMet : {},
+        npcQuests: (saved.npcQuests && Array.isArray(saved.npcQuests.daily)) ? saved.npcQuests : null,
+        npcFestival: (saved.npcFestival && typeof saved.npcFestival === 'object') ? saved.npcFestival : null,
+        // COZY-E — start: pulihkan field ekonomi multiplayer (aditif).
+        mpVisits: (saved.mpVisits && typeof saved.mpVisits === 'object' && !Array.isArray(saved.mpVisits))
+          ? Object.fromEntries(Object.entries(saved.mpVisits)
+            .filter(([k, v]) => /^[a-z0-9_]{3,16}$/.test(k) && /^\d{4}-\d{2}-\d{2}$/.test(String(v))))
+          : {},
+        mpTrades: Array.isArray(saved.mpTrades) ? saved.mpTrades.slice(0, 20) : [],
+        mpMinigameBest: Number.isInteger(saved.mpMinigameBest) && saved.mpMinigameBest >= 0 ? saved.mpMinigameBest : 0,
+        // COZY-E — end
         playerX: saved.player?.x ?? 6, playerZ: saved.player?.z ?? 20,
       });
       if (Array.isArray(saved.plots) && saved.plots.length === this.state.plots.length) this.state.plots = saved.plots;
@@ -179,8 +239,19 @@ class Game {
     this.camera.far = this.world.view.camFar;
     this.camera.updateProjectionMatrix();
     this.player = new Player(this.scene, this.state.gender, this.state.playerX, this.state.playerZ, this.state.custom);
-    this.farm = new Farm(this.scene, this.state.plots);
+    this.farm = new Farm(this.scene, this.state.plots, this.state.trees);
+    // COZY-C — start: mesin pengolah + collider pohon buah masuk ke
+    // world.colliders (fisika pemain menabrak batang/mesin, bukan tembus).
+    this.machine = buildMachine(this.scene, THREE, { toonMat, addOutline, terrainHeight });
+    this.world.colliders.push(this.machine.collider, ...this.farm.treeColliders);
+    // COZY-C — end
     this.animals = new Animals(this.scene, this.state.animals);
+    // COZY-D — NPC + Sosial: warga desa + pedagang keliling (dibangun
+    // sekali di init; update() dipanggil dari loop utama). npcT = t() untuk
+    // teks toast NPC (npc.js tidak mengimpor i18n agar tidak melingkar).
+    this.npcT = (k, vars) => t(k, this.state.lang, vars);
+    this.npc = new NpcManager(this.scene, this);
+    // COZY-D — end
     this.crate = new DynamicBox(7, -15);
     this.input = new Input();
     this.input.onAction = () => this.doAction();
@@ -191,6 +262,10 @@ class Game {
       onBuy: (k, p, n) => this.buyItem(k, p, n),
       onSell: (k, p, n) => this.sellItem(k, p, n),
       onPlant: (crop) => this.plantChosen(crop),
+      // COZY-C — start: handler panel olah + tanam pohon (ui.js memanggil).
+      onCraft: (recipeId) => this.craft(recipeId),
+      onPlantTree: (kind) => this.plantTreeChosen(kind),
+      // COZY-C — end
       onSleepYes: () => { this.ui.closeSleep(); this.sleep(); },
       onClearSave: () => this.clearAllSave(),
       onLang: (lang) => this.setLang(lang),
@@ -204,6 +279,16 @@ class Game {
       onOffline: () => this.enterOfflineMode(),
       onLogout: () => this.handleLogout(),
       onDeleteServerSave: () => this.deleteServerSave(),
+      // COZY-D — NPC + Sosial: handler dialog / hadiah / dagangan / panel.
+      onNpcTalk: (id) => this.npc.talkTo(id),
+      onNpcChoice: (id, nodeId, idx) => this.npc.choose(id, nodeId, idx),
+      onNpcRoot: (id) => this.npc.rootNode(this.npc.npcById(id)),
+      onNpcEndTalk: () => this.npc.endTalk(),
+      onNpcGift: (id, item) => this.npcGiveGift(id, item),
+      onNpcBuy: (key) => this.npcBuyFromMerchant(key),
+      onNpcPanelData: () => this.npc.panelData(),
+      onNpcGiftables: () => this.npcGiftables(),
+      // COZY-D — end
       // Minimap: posisi + arah pemain live, data peta dari world (robustness
       // atas fallback window.__LH_GAME yang sudah ada di ui.js).
       getMinimap: () => ({
@@ -230,6 +315,13 @@ class Game {
         });
       },
       onEvent: (type, data) => {
+        // COZY-E — start: broadcast ekonomi multiplayer -> MpEconomy.
+        // (trade_offer / trade_done / trade_declined / mp_game_*).
+        if (type === 'trade_offer' || type === 'trade_done' || type === 'trade_declined'
+          || type === 'mp_game_start' || type === 'mp_game_score' || type === 'mp_game_end') {
+          this.mpEco?.handleBroadcast(type, data);
+        }
+        // COZY-E — end
         // Invite "Ajak Main": rute event invite ke modul (tanpa mengubah
         // handler chat/joined/game_result yang sudah ada di bawah).
         if (type === 'invite' || type === 'invite_accept'
@@ -292,6 +384,59 @@ class Game {
     this.ui.h.onLeaveRoom = () => this.mp.leaveRoom();
     this.ui.h.onSendChat = (text) => { if (this.mp.sendChat(text)) this.ui.addRoomChat(selfName(), text); };
     this.ui.h.getRemotePlayers = () => this.remotePlayers || [];
+    // COZY-E — start: ekonomi multiplayer (MpEconomy). Server yang
+    // memvalidasi + menerapkan; client hanya mengusulkan/menampilkan.
+    // Semua angka koin/inventory yang diterapkan di bawah berasal dari
+    // RESPONS SERVER (accept/visit/claim), bukan dari broadcast/client.
+    this.mpEco = new MpEconomy({
+      getMp: () => this.mp,
+      api: {
+        mpGarden, mpTradePropose, mpTradeAccept, mpTradeDecline, mpVisit,
+        mpMinigameSubmit, mpMinigameResults, mpMinigameClaim, mpLeaderboard,
+      },
+      getUsername: () => selfName(),
+      onEvent: (type, data) => this._onMpEcoEvent(type, data),
+    });
+    this.ui.h.onRoomOpened = () => { if (this.session) this.mpEco.probe(); };
+    this.ui.h.getMpSession = () => !!this.session;
+    this.ui.h.getMpInv = () => this.state.inv;
+    this.ui.h.getMpRoom = () => (this.mp.connected ? this.mp.roomCode : null);
+    this.ui.h.getMpEco = () => this.mpEco;
+    this.ui.h.onMpVisit = (username) => this.visitGarden(username);
+    this.ui.h.onMpTradePropose = async (to, offer, want) => {
+      try { await this.mpEco.proposeTrade(to, offer, want); }
+      catch (e) {
+        if (isMpUnavailable(e)) this.ui.toast(t('mpComingSoon', this.state.lang));
+        else if (e && e.message === 'no_session') this.ui.toast(t('needLogin', this.state.lang));
+        else this.ui.toast((e && e.message) || t('mpTradeFailed', this.state.lang));
+      }
+    };
+    this.ui.h.onMpTradeAccept = async (offerId) => {
+      try { await this.mpEco.acceptTrade(offerId); }
+      catch (e) {
+        if (isMpUnavailable(e)) this.ui.toast(t('mpComingSoon', this.state.lang));
+        else this.ui.toast((e && e.message) || t('mpTradeFailed', this.state.lang));
+      }
+    };
+    this.ui.h.onMpTradeDecline = async (offerId) => {
+      try { await this.mpEco.declineTrade(offerId); }
+      catch (e) { this.ui.toast((e && e.message) || t('mpTradeFailed', this.state.lang)); }
+    };
+    this.ui.h.onMpGameStart = () => {
+      if (!this.mp.connected) { this.ui.toast(t('inviteNeedRoom', this.state.lang)); return; }
+      if (!this.session) { this.ui.toast(t('needLogin', this.state.lang)); return; }
+      this.mpEco.startMinigame(this.mp.roomCode);
+    };
+    this.ui.h.onMpGameTap = () => this.mpEco.tapGame();
+    this.ui.h.onMpLeaderboard = async () => {
+      try { await this.mpEco.loadLeaderboard(); }
+      catch (e) {
+        if (isMpUnavailable(e)) this.ui.toast(t('mpComingSoon', this.state.lang));
+        else if (e && e.message === 'no_session') this.ui.toast(t('needLogin', this.state.lang));
+        else this.ui.toast((e && e.message) || t('loadFailed', this.state.lang));
+      }
+    };
+    // COZY-E — end
     this.ui.setLang(this.state.lang);
     this.ui.setAuthState(this.session ? this.session.username : null);
     this.ui.showStart(this._hadSave
@@ -482,6 +627,8 @@ class Game {
         this.world.crate.position.set(crate.x, crate.y + 0.7, crate.z);
         this.world.crate.rotation.y += (Math.hypot(crate.vx, crate.vz) * dt) * 0.4;
         this.animals.update(dt, t);
+        // COZY-D — NPC + Sosial: jadwal + gerak warga desa / pedagang.
+        this.npc?.update(dt, this.state.minutes, this.state.day);
         // Pasar malam: game/wahana/jajanan + kirim posisi ke room (~10 Hz,
         // throttle internal di Multiplayer).
         this.nmGames.update(dt, t, this);
@@ -625,6 +772,9 @@ class Game {
       const pl = this.state.plots[plot.iz * FARM_COLS + plot.ix];
       if (!pl.hoed && !pl.crop) ctx = { type: 'hoe', plot, label: t('actionHoe', this.state.lang) };
       else if (pl.hoed && !pl.crop) ctx = { type: 'plant', plot, label: t('actionPlant', this.state.lang) };
+      // COZY-C: pupuk dulu bila ada tanaman belum dipupuk + pupuk tersedia
+      // (sebelum siram — sekali per siklus; habis panen fert reset).
+      else if (pl.crop && !pl.fert && !this.farm.isReady(pl) && (this.state.inv.fertiliser || 0) > 0) ctx = { type: 'fertilise', plot, label: t('actionFertilise', this.state.lang) };
       else if (pl.crop && !pl.watered && !this.farm.isReady(pl)) ctx = { type: 'water', plot, label: t('actionWater', this.state.lang) };
       else if (pl.crop && this.farm.isReady(pl)) ctx = { type: 'harvest', plot, label: t('actionHarvest', this.state.lang) };
     }
@@ -633,12 +783,33 @@ class Game {
       if ((a.ready || 0) > 0) ctx = { type: 'collect', kind: a.kind, label: t('actionCollect', this.state.lang) };
       else if (!a.fed) ctx = { type: 'feed', kind: a.kind, label: t('actionFeed', this.state.lang) };
     }
+    // COZY-C — start: pohon buah + mesin pengolah (setelah petak/hewan,
+    // sebelum pintu/toko — posisinya tidak bertabrakan dengan keduanya).
+    if (!ctx) {
+      const treeIdx = this.farm.nearestTree(p.x, p.z);
+      if (treeIdx >= 0) {
+        const tr = this.state.trees[treeIdx];
+        if (!tr.kind) ctx = { type: 'plantTree', tree: treeIdx, label: t('actionPlantTree', this.state.lang) };
+        else if (this.farm.treeIsReady(treeIdx)) ctx = { type: 'harvestTree', tree: treeIdx, label: t('actionHarvestTree', this.state.lang) };
+      }
+    }
+    if (!ctx && this.machine) {
+      const dm = Math.hypot(p.x - this.machine.pos.x, p.z - this.machine.pos.z);
+      if (dm < 3.2) ctx = { type: 'machine', label: t('actionMachine', this.state.lang) };
+    }
+    // COZY-C — end
     if (!ctx && nearDoor) ctx = { type: 'sleep', label: t('actionSleep', this.state.lang) };
     if (!ctx && nearShop) ctx = { type: 'shop', label: t('actionShop', this.state.lang) };
     if (!ctx && nearGate && this.animals.fedCount() < this.state.animals.length) {
       ctx = { type: 'feedAll', label: t('actionFeed', this.state.lang) };
     }
     if (!ctx && nearCrate) ctx = { type: 'push', label: t('actionPush', this.state.lang) };
+    // COZY-D — NPC + Sosial: warga terdekat (r 2,8 m) — dicek sesudah
+    // petak/hewan/rumah/toko, sebelum pasar malam (zona jauh, tidak bentrok).
+    if (!ctx && this.npc) {
+      const near = this.npc.nearestNpc(p.x, p.z, 2.8);
+      if (near) ctx = { type: 'npc', id: near.def.id, label: t('actionTalk', this.state.lang, { name: near.def.name }) };
+    }
     // Pasar malam: game berhadiah (r 3,2), jajanan (r 2,8), wahana (r board).
     // Dicek setelah ctx lama supaya petak/kandang/toko/dll tetap prioritas.
     if (!ctx && this.nmGames) {
@@ -675,9 +846,36 @@ class Game {
         break;
       case 'harvest': {
         const got = this.harvestAt(ctx.plot.ix, ctx.plot.iz);
-        if (got) { this.sfx.play('harvest'); this.ui.toast(t('harvested', lang)); }
+        // COZY-C: harvestAt kini mengembalikan {crop, quality} — toast
+        // menyebut kualitasnya (Bagus/Langka terbaca pemain).
+        if (got) {
+          this.sfx.play('harvest');
+          const qk = got.quality === 'normal' ? 'harvested' : 'harvestedQuality';
+          this.ui.toast(t(qk, lang, { item: itemName(got.crop, lang), q: t(`quality${got.quality === 'good' ? 'Good' : got.quality === 'rare' ? 'Rare' : 'Normal'}`, lang) }));
+        }
         break;
       }
+      // COZY-C — start: pupuk / pohon buah / mesin pengolah.
+      case 'fertilise':
+        if (this.fertiliseAt(ctx.plot.ix, ctx.plot.iz)) { this.sfx.play('plant'); this.ui.toast(t('fertilised', lang)); }
+        else this.ui.toast(t('needFertiliser', lang));
+        break;
+      case 'plantTree':
+        this._pendingTree = ctx.tree;
+        this.ui.openTreePicker(this.state, (kind) => this.plantTreeChosen(kind));
+        break;
+      case 'harvestTree': {
+        const got = this.harvestTree(ctx.tree);
+        if (got) {
+          this.sfx.play('harvest');
+          this.ui.toast(t('harvestedTree', lang, { n: got.count, item: itemName(got.kind, lang) }));
+        }
+        break;
+      }
+      case 'machine':
+        this.ui.openCraft(this.state);
+        break;
+      // COZY-C — end
       case 'feed': {
         const r = this.feedAnimal(ctx.kind);
         if (r.ok) { this.sfx.play('animal'); this.ui.toast(t('fed', lang)); }
@@ -699,6 +897,8 @@ class Game {
       case 'sleep': this.ui.openSleep(); break;
       case 'shop': this.ui.openShop('buy', this.state); break;
       case 'push': this.ui.toast(t('actionPush', lang)); break;
+      // COZY-D — NPC + Sosial: buka dialog warga (sapaan Lane A di npc.js).
+      case 'npc': this.ui.openDialogue(ctx.id); break;
       case 'nmGame': this.nmGames.onUse(ctx.id, this); break;
       case 'nm': this.nmRides.onUse(ctx.id, this); break;
       case 'food': this.nmFood.onUse(ctx.id, this); break;
@@ -722,6 +922,25 @@ class Game {
     }
     return false;
   }
+  // COZY-C — start: tanam bibit pohon di titik yang dipilih (dari picker).
+  plantTreeChosen(kind) {
+    const idx = this._pendingTree;
+    this._pendingTree = null;
+    if (idx === undefined || idx === null) return false;
+    const key = kind === 'apple' ? 'appleSapling' : kind === 'orange' ? 'orangeSapling' : null;
+    if (!key || (this.state.inv[key] || 0) < 1) {
+      this.ui.toast(t('needSapling', this.state.lang));
+      return false;
+    }
+    if (this.farm.plantTree(idx, kind, this.state.inv)) {
+      this.sfx.play('plant');
+      this.ui.toast(t('treePlanted', this.state.lang, { item: itemName(kind, this.state.lang) }));
+      this.save();
+      return true;
+    }
+    return false;
+  }
+  // COZY-C — end
 
   // ---------- Akun + sinkronisasi cloud ----------
   // Aturan sinkronisasi (lengkap di README):
@@ -744,6 +963,22 @@ class Game {
     this.state.username = d.username || this.state.username;
     this.state.updatedAt = d.updatedAt || d.savedAt || 0;
     this.state.inv = { ...this.state.inv, ...(d.inv || {}) };
+    // COZY-C — start: field ekonomi baru dari cloud (absen = default lama).
+    this.state.invQ = sanitizeInvQ(d.invQ || {}, this.state.inv);
+    if (Array.isArray(d.trees)) {
+      this.state.trees.splice(0, this.state.trees.length, ...sanitizeTrees(d.trees));
+      this.farm.refreshTrees();
+    }
+    if (typeof d.machineCooldown === 'number') this.state.machineCooldown = d.machineCooldown;
+    // COZY-C — end
+    // COZY-D — NPC + Sosial: pulihkan dari save cloud (aditif, save lama
+    // tanpa field ini = tetap kosong; NpcManager mengisi default bila null).
+    if (d.npcFriendship && typeof d.npcFriendship === 'object') this.state.npcFriendship = d.npcFriendship;
+    if (d.npcGiftedDay && typeof d.npcGiftedDay === 'object') this.state.npcGiftedDay = d.npcGiftedDay;
+    if (d.npcMet && typeof d.npcMet === 'object') this.state.npcMet = d.npcMet;
+    if (d.npcQuests && Array.isArray(d.npcQuests.daily)) this.state.npcQuests = d.npcQuests;
+    if (d.npcFestival && typeof d.npcFestival === 'object') this.state.npcFestival = d.npcFestival;
+    this.npc?._ensureState();
     if (Array.isArray(d.plots) && d.plots.length === this.state.plots.length) {
       this.state.plots.splice(0, this.state.plots.length, ...d.plots);
       this.farm.refreshAll();
@@ -940,10 +1175,71 @@ class Game {
   plantAt(ix, iz, crop) { const ok = this.farm.plantAt(ix, iz, crop, this.state.inv); if (ok) this.save(); return ok; }
   waterAt(ix, iz) { const ok = this.farm.waterAt(ix, iz); if (ok) this.save(); return ok; }
   harvestAt(ix, iz) {
-    const got = this.farm.harvestAt(ix, iz, this.state.inv);
+    // COZY-C: mengembalikan {crop, quality} (bukan lagi string crop saja);
+    // kualitas dicatat di state.invQ supaya harga jual ikut kualitas.
+    const got = this.farm.harvestAt(ix, iz, this.state.inv, this.state.invQ);
+    if (got) {
+      // COZY-D — NPC + Sosial: progres quest panen (harian/mingguan/festival).
+      this.npc?.onHarvest(1);
+      this.save();
+    }
+    return got || false;
+  }
+  // COZY-C — start: pupuk + pohon buah (API inti, dipakai UI + __LH_GAME).
+  fertiliseAt(ix, iz) {
+    const ok = this.farm.fertiliseAt(ix, iz, this.state.inv);
+    if (ok) this.save();
+    return ok;
+  }
+  harvestTree(i) {
+    const got = this.farm.harvestTree(i, this.state.inv, this.state.invQ);
     if (got) this.save();
     return got || false;
   }
+  plantTree(i, kind) {
+    const ok = this.farm.plantTree(i, kind, this.state.inv);
+    if (ok) this.save();
+    return ok;
+  }
+  buySapling(kind) {
+    const s = SAPLINGS[kind];
+    if (!s) return false;
+    return this.buyItem(s.seedKey, s.price, s.name);
+  }
+  buyFertiliser() { return this.buyItem('fertiliser', FERTILISER.price, FERTILISER.name); }
+  // Olah di mesin pengolah: instan, cooldown 15 detik nyata per mesin
+  // (state.machineCooldown = epoch ms kapan mesin siap lagi; tersimpan di
+  // save supaya reload tidak me-reset cooldown). Bahan diambil kualitas
+  // terbaik dulu; bonus hasil dari bahan bagus/langka (economy.craftBonus).
+  craft(recipeId) {
+    const recipe = RECIPES.find((r) => r.id === recipeId);
+    if (!recipe) return { ok: false, reason: 'recipe' };
+    const now = Date.now();
+    if (now < this.state.machineCooldown) {
+      return { ok: false, reason: 'cooldown', readyInMs: this.state.machineCooldown - now };
+    }
+    for (const [item, n] of Object.entries(recipe.inputs)) {
+      if ((this.state.inv[item] || 0) < n) return { ok: false, reason: 'inputs' };
+    }
+    let bonus = 0;
+    for (const [item, n] of Object.entries(recipe.inputs)) {
+      const took = takeUnit(this.state.inv, this.state.invQ, item, n);
+      bonus += craftBonus(took.quality);
+    }
+    const outId = Object.keys(recipe.output)[0];
+    const outN = recipe.output[outId] + bonus;
+    this.state.inv[outId] = (this.state.inv[outId] || 0) + outN;
+    this.state.machineCooldown = now + MACHINE_COOLDOWN_MS;
+    this.sfx.play('coin');
+    this.ui.toast(t('craftMade', this.state.lang, { n: outN, item: itemName(outId, this.state.lang) }));
+    this.ui.refreshCraft(this.state);
+    this.ui.updateHUD(this.state);
+    this.save();
+    return { ok: true, output: { [outId]: outN }, bonus };
+  }
+  // Permintaan pasar hari ini (deterministik dari hari — tanpa simpan).
+  demandToday() { return demandFor(this.state.day); }
+  // COZY-C — end
   // ---------- Urutan tidur sinematik (~10 detik) ----------
   // Fase (semua timing dari wall-clock performance.now(), BUKAN akumulasi dt
   // — rAF berhenti saat tab hidden, jadi urutan tidak pernah softlock):
@@ -1000,6 +1296,8 @@ class Game {
     const prod = this.animals.produceMorning();
     this.state.day += 1;
     this.state.minutes = DAY_START;
+    // COZY-D — NPC + Sosial: reset quest harian/mingguan di hari baru.
+    this.npc?.onNewDay(this.state.day);
     this.save();
     this.ui.updateHUD(this.state);
     return { day: this.state.day, grown, eggs: prod.eggs, milk: prod.milk };
@@ -1090,7 +1388,10 @@ class Game {
     this.sleepPhase = null;
     this._sleep = null;
     this.save(); // posisi akhir (di luar pintu) ikut tersimpan
-    this.ui.toast(t('morning', this.state.lang, { d: this.state.day }));
+    // COZY-C: toast pagi menyebut permintaan pasar hari ini (rotasi harian).
+    const dmd = demandFor(this.state.day);
+    const wantedNames = dmd.wanted.map((id) => itemName(id, this.state.lang)).join(' • ');
+    this.ui.toast(`${t('morning', this.state.lang, { d: this.state.day })} ${t('marketToday', this.state.lang, { items: wantedNames })}`);
     this.ui.updateHUD(this.state);
   }
   teleport(x, z) { this.player.teleport(x, z); return true; }
@@ -1106,13 +1407,50 @@ class Game {
   feedAnimal(kind) {
     if (!ANIMAL_DEFS[kind]) return { ok: false, reason: 'kind' };
     const r = this.animals.feedAnimal(kind, this.state);
-    if (r.ok) this.save();
+    if (r.ok) {
+      // COZY-D — NPC + Sosial: progres quest beri makan harian.
+      this.npc?.onFeed(1);
+      this.save();
+    }
     return r;
   }
+  // COZY-D — NPC + Sosial: hadiah / belanja pedagang / daftar hadiah.
+  // (Logika inti di npc.js; di sini hanya toast + refresh HUD.)
+  npcGiveGift(id, item) {
+    const r = this.npc.giveGift(id, item);
+    if (r.ok) {
+      const name = this.npc.npcById(id)?.def.name || id;
+      this.sfx.play('coin');
+      this.ui.toast(t(r.liked ? 'npcGiftLiked' : 'npcGiftOk', this.state.lang, { name, n: r.gain }));
+    } else if (r.reason === 'none') this.ui.toast(t('npcGiftNone', this.state.lang));
+    else if (r.reason === 'already') this.ui.toast(t('npcGiftAlready', this.state.lang, { name: this.npc.npcById(id)?.def.name || id }));
+    return r;
+  }
+  npcBuyFromMerchant(key) {
+    const r = this.npc.buyFromMerchant(key);
+    if (r.ok) {
+      this.sfx.play('coin');
+      this.ui.toast(t('npcBuyOk', this.state.lang, { item: key }));
+    } else if (r.reason === 'coins') this.ui.toast(t('needCoins', this.state.lang));
+    return r;
+  }
+  npcGiftables() {
+    const inv = this.state.inv;
+    return ['carrot', 'tomato', 'pumpkin', 'egg', 'milk', 'goldenEgg']
+      .map((k) => ({ key: k, owned: inv[k] || 0 }))
+      .filter((g) => g.owned > 0);
+  }
+  // COZY-D — end
   collectAnimal(kind) {
     if (!ANIMAL_DEFS[kind]) return 0;
     const n = this.animals.collectAnimal(kind, this.state.inv);
-    if (n > 0) this.save();
+    // COZY-C: hasil ternak ikut roll kualitas (tanah subur tetap, tanpa
+    // pupuk) supaya telur/susu bagus/langka ikut dihargai pasar.
+    if (n > 0) {
+      const produce = ANIMAL_DEFS[kind].produce;
+      for (let i = 0; i < n; i++) addQuality(this.state.invQ, produce, rollQuality(Math.random(), 80, false), 1);
+      this.save();
+    }
     return n;
   }
   buySeed(cropId) {
@@ -1133,32 +1471,197 @@ class Game {
     return true;
   }
   sellItem(key, price, name) {
+    // COZY-C: harga TIDAK lagi diambil dari parameter UI (p) — dihitung
+    // ulang dari economy.js (dasar × kualitas unit terbaik × permintaan
+    // hari ini) supaya toko, sellAll, dan panel pasar selalu sama.
     if ((this.state.inv[key] || 0) < 1) return false;
-    this.state.inv[key] -= 1;
-    this.state.coins += price;
+    const q = bestUnit(this.state.inv, this.state.invQ, key);
+    const actual = sellPrice(key, q, this.state.day);
+    takeUnit(this.state.inv, this.state.invQ, key, 1);
+    this.state.coins += actual;
     this.sfx.play('coin');
-    this.ui.toast(t('sold', this.state.lang, { n: price }));
+    this.ui.toast(t('sold', this.state.lang, { n: actual }));
     this.ui.refreshShop(this.state);
     this.ui.updateHUD(this.state);
     this.save();
     return true;
   }
   sellAll() {
-    const prices = { carrot: 12, tomato: 20, pumpkin: 32, egg: 8, milk: 15 };
-    let earned = 0, count = 0;
-    for (const [k, price] of Object.entries(prices)) {
-      const n = this.state.inv[k] || 0;
-      if (n > 0) { earned += n * price; count += n; this.state.inv[k] = 0; }
+    // COZY-C: harga hardcoded lama ({carrot:12, ...}) DIGANTI economy.js —
+    // computeSellAll menghitung dasar × kualitas × permintaan per unit,
+    // termasuk barang baru (gandum/stroberi/buah/olahan).
+    const res = computeSellAll(this.state.inv, this.state.invQ, this.state.day);
+    for (const line of res.lines) {
+      this.state.inv[line.id] = 0;
+      if (this.state.invQ[line.id]) delete this.state.invQ[line.id];
     }
-    if (earned > 0) {
-      this.state.coins += earned;
+    if (res.earned > 0) {
+      this.state.coins += res.earned;
       this.sfx.play('coin');
-      this.ui.toast(t('sold', this.state.lang, { n: earned }));
+      this.ui.toast(t('sold', this.state.lang, { n: res.earned }));
       this.ui.updateHUD(this.state);
       this.save();
     }
-    return { earned, count, coins: this.state.coins };
+    return { earned: res.earned, count: res.count, coins: this.state.coins };
   }
+  // COZY-E — start: ekonomi multiplayer (handler event MpEconomy).
+  // Aturan: angka koin/inventory HANYA dari respons server.
+  _onMpEcoEvent(type, data) {
+    const lang = this.state.lang;
+    if (type === 'mp-unavailable') {
+      this.ui.setMpAvailable(false);
+      return;
+    }
+    if (type === 'garden') {
+      const { garden, visit } = data;
+      if (visit && typeof visit.coins === 'number') this.state.coins = visit.coins;
+      if (visit && !visit.already) {
+        if (!this.state.mpVisits || typeof this.state.mpVisits !== 'object') this.state.mpVisits = {};
+        this.state.mpVisits[garden.username] = new Date().toISOString().slice(0, 10);
+      }
+      this.ui.showMpGarden(garden, visit);
+      if (visit && !visit.already && visit.reward > 0) {
+        this.ui.toast(t('mpVisitReward', lang, { n: visit.reward }));
+      } else if (visit && visit.already) {
+        this.ui.toast(t('mpVisitAgain', lang));
+      }
+      this.ui.updateHUD(this.state);
+      this.save();
+      return;
+    }
+    if (type === 'trade-sent') {
+      this.ui.toast(t('mpTradeSent', lang));
+      this.ui.setMpTradePending(data);
+      return;
+    }
+    if (type === 'trade-offer') {
+      this.ui.showMpTradeOffer(data);
+      return;
+    }
+    if (type === 'trade-done') {
+      // Saya penerima: server mengembalikan inv/koin SAYA sesudah swap.
+      if (data.inv) this.state.inv = { ...this.state.inv, ...data.inv };
+      if (typeof data.coins === 'number') this.state.coins = data.coins;
+      if (data.offer) {
+        this._recordMpTrade({
+          id: data.offerId, with: data.offer.from,
+          give: data.offer.want, get: data.offer.offer, at: Date.now(),
+        });
+      }
+      this.ui.hideMpTradeOffer();
+      this.ui.toast(t('mpTradeDone', lang));
+      this.ui.updateHUD(this.state);
+      this.save();
+      return;
+    }
+    if (type === 'trade-done-remote') {
+      // Saya pengusul: server sudah mengubah save saya — ambil ulang.
+      if (data) {
+        this._recordMpTrade({
+          id: data.offerId, with: data.to,
+          give: data.offer, get: data.want, at: Date.now(),
+        });
+        // Terapkan inv/koin pasca-trade SEGERA (peerInv/peerCoins direlay
+        // lewat broadcast dari respons accept — nilai hasil server, bukan
+        // klaim client). Ini menutup balapan autosave-vs-refresh: PUT
+        // autosave berikutnya sudah membawa state pasca-trade. Validasi
+        // ketat sebelum menerapkan: kunci harus dikenal (ada di state.inv),
+        // nilai integer 0-99999, koin 0-999999 — nilai di luar itu diabaikan
+        // dan GET sesudahnya yang memutuskan. Sisa risiko: peer nakal bisa
+        // merelay peerInv palsu NAMUN dalam range; dampaknya terbatas
+        // (tampilan + PUT berikutnya) dan GET konfirmasi (milidetik
+        // kemudian) langsung menimpanya dengan kebenaran server.
+        if (data.peerInv && typeof data.peerInv === 'object' && !Array.isArray(data.peerInv)) {
+          const keys = Object.keys(data.peerInv);
+          const ok = keys.length > 0 && keys.every((k) =>
+            Object.prototype.hasOwnProperty.call(this.state.inv, k)
+            && Number.isInteger(data.peerInv[k]) && data.peerInv[k] >= 0 && data.peerInv[k] <= 99999);
+          if (ok) {
+            this.state.inv = { ...this.state.inv, ...data.peerInv };
+            if (Number.isInteger(data.peerCoins) && data.peerCoins >= 0 && data.peerCoins <= 999999) {
+              this.state.coins = data.peerCoins;
+            }
+            this.ui.updateHUD(this.state);
+          }
+        }
+      }
+      this.ui.setMpTradePending(null);
+      this.ui.toast(t('mpTradeDone', lang));
+      this._refreshSaveAfterTrade();
+      return;
+    }
+    if (type === 'trade-declined') {
+      this.ui.hideMpTradeOffer();
+      this.ui.toast(t('mpTradeDeclined', lang));
+      return;
+    }
+    if (type === 'trade-declined-remote') {
+      this.ui.setMpTradePending(null);
+      this.ui.toast(t('mpTradeDeclined', lang));
+      return;
+    }
+    if (type === 'game-started') {
+      this.ui.showMpGame(data.room, data.endsAt);
+      return;
+    }
+    if (type === 'game-score') {
+      this.ui.setMpGameScores(this.mpEco.game ? this.mpEco.game.scores : {});
+      return;
+    }
+    if (type === 'game-ended') {
+      if (data.unavailable) { this.ui.toast(t('mpComingSoon', lang)); return; }
+      if (data.error) { this.ui.toast(t('loadFailed', lang)); return; }
+      if (typeof data.coins === 'number') this.state.coins = data.coins;
+      if (Number.isInteger(data.score) && data.score > (this.state.mpMinigameBest || 0)) {
+        this.state.mpMinigameBest = data.score;
+      }
+      this.ui.showMpGameResults(data);
+      this.ui.updateHUD(this.state);
+      this.save();
+      return;
+    }
+    if (type === 'game-ended-remote') {
+      this.ui.showMpGameResults({ room: data.room, winner: data.winner, scores: data.scores, remote: true });
+      return;
+    }
+    if (type === 'leaderboard') {
+      this.ui.showMpLeaderboard(data.board || []);
+      return;
+    }
+  }
+
+  // Kunjungi kebun pemain lain: snapshot publik + hadiah sekali-sehari.
+  // Hadiah + koin diterapkan dari respons server (lihat _onMpEcoEvent).
+  async visitGarden(username) {
+    if (!this.session) { this.ui.toast(t('needLogin', this.state.lang)); return; }
+    if (!username || username === this.state.username) return;
+    try {
+      await this.mpEco.visitGarden(username);
+    } catch (e) {
+      if (isMpUnavailable(e)) this.ui.toast(t('mpComingSoon', this.state.lang));
+      else if (e && e.message === 'no_session') this.ui.toast(t('needLogin', this.state.lang));
+      else this.ui.toast((e && e.message) || t('loadFailed', this.state.lang));
+    }
+  }
+
+  _recordMpTrade(entry) {
+    if (!entry || !entry.id) return;
+    if (!Array.isArray(this.state.mpTrades)) this.state.mpTrades = [];
+    this.state.mpTrades.unshift(entry);
+    this.state.mpTrades = this.state.mpTrades.slice(0, 20);
+  }
+
+  // Sesudah trade selesai sebagai pengusul: tarik save server terbaru
+  // (server sudah menerapkan swap di sana). Gagal jaringan -> tandai
+  // pending; sync berikutnya memperbaikinya.
+  async _refreshSaveAfterTrade() {
+    if (!this.session) return;
+    try {
+      const res = await cloudGetSave();
+      if (res && res.save) this.applySaveData(res.save);
+    } catch (e) { markPending(); }
+  }
+  // COZY-E — end
   getStateSnapshot() {
     return JSON.parse(JSON.stringify({
       coins: this.state.coins, day: this.state.day, minutes: this.state.minutes,
@@ -1168,6 +1671,13 @@ class Game {
       inv: this.state.inv,
       plots: this.state.plots,
       animals: this.state.animals,
+      // COZY-C: snapshot ekonomi baru untuk probe/verifikasi.
+      invQ: this.state.invQ,
+      trees: this.state.trees,
+      machineCooldown: this.state.machineCooldown,
+      demand: demandFor(this.state.day),
+      // COZY-D — NPC + Sosial (untuk probe/debug via getStateSnapshot).
+      npc: this.npc ? this.npc.debug() : null,
       player: { x: this.player.x, z: this.player.z, y: this.player.y },
     }));
   }

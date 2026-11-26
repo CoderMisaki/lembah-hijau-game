@@ -7,6 +7,12 @@ import { t, applyI18n, LH_SFX } from './i18n.js';
 import { icon } from './icons.js';
 import { CROPS } from './farm.js';
 import { ANIMAL_DEFS } from './animals.js';
+// COZY-C — start: ekonomi baru — harga dinamis, resep olah, pohon buah.
+import {
+  RECIPES, FERTILISER, SAPLINGS, TREE_DEFS, MACHINE_COOLDOWN_MS,
+  demandFor, sellPrice, bestUnit, itemName, itemIcon,
+} from './economy.js';
+// COZY-C — end
 import { buildCharacter } from './player.js';
 // Minimap: konstanta fallback bila world.minimapData belum ada (lane dunia
 // paralel) — peta tetap tergambar dari data yang sudah diekspor.
@@ -19,7 +25,9 @@ import {
   HAT_MODELS, GLASSES_MODELS, SHOES_MODELS, PALETTE, FRAME_COLORS,
   defaultCustom, sanitizeCustom,
 } from './customization.js';
-import { isValidRoomCode, normalizeRoomCode } from './multiplayer.js';
+import { isValidRoomCode, normalizeRoomCode, MP_ECO_TRADE_ITEMS } from './multiplayer.js';
+// COZY-D — NPC + Sosial (Lane D): nama barang hadiah + dagangan pedagang.
+import { GIFTABLE, MERCHANT_STOCK } from './npc.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -144,7 +152,78 @@ export class UI {
     });
     $('custom-male').addEventListener('click', () => this._setCustomGender('male'));
     $('custom-female').addEventListener('click', () => this._setCustomGender('female'));
+    // COZY-D — NPC + Sosial: tombol "Warga" di HUD (dibangun dinamis —
+    // index.html di luar batas lane; teks ikut i18n via data-i18n).
+    const hudRight = document.getElementById('hud-right');
+    if (hudRight && !document.getElementById('btn-npc')) {
+      const b = el('button', 'hud-btn', t('npcTitle', this.lang));
+      b.id = 'btn-npc';
+      b.setAttribute('data-i18n', 'npcTitle');
+      b.addEventListener('click', () => this.openNpcPanel());
+      hudRight.appendChild(b);
+    }
+    // COZY-D — end
+    // COZY-C — start: panel olah + picker pohon dibuat di sini (DOM
+    // dinamis) supaya index.html tidak disentuh; tab Pasar ditambahkan ke
+    // tab toko yang sudah ada. data-i18n supaya ganti bahasa ikut jalan.
+    this._buildCraftModal();
+    this._buildTreeModal();
+    const shopTabs = document.querySelector('#shop-modal .tabs');
+    if (shopTabs) {
+      const tab = document.createElement('button');
+      tab.id = 'tab-market';
+      tab.className = 'tab';
+      tab.type = 'button';
+      tab.setAttribute('data-i18n', 'marketTab');
+      tab.textContent = t('marketTab', this.lang);
+      tab.addEventListener('click', () => this.openShop('market'));
+      shopTabs.appendChild(tab);
+    }
+    // COZY-C — end
   }
+  // COZY-C — start: modal olah + modal pohon (dibangun sekali di _bind).
+  _buildCraftModal() {
+    const modal = el('div', 'modal hidden');
+    modal.id = 'craft-modal';
+    const panel = el('div', 'panel modal-panel');
+    const h = el('h2');
+    h.setAttribute('data-i18n', 'craftTitle');
+    h.textContent = t('craftTitle', this.lang);
+    panel.appendChild(h);
+    const note = el('p');
+    note.id = 'craft-note';
+    panel.appendChild(note);
+    const list = el('div');
+    list.id = 'craft-list';
+    panel.appendChild(list);
+    const close = el('button', 'primary-btn', t('close', this.lang));
+    close.id = 'btn-close-craft';
+    close.setAttribute('data-i18n', 'close');
+    close.addEventListener('click', () => this.closeCraft());
+    panel.appendChild(close);
+    modal.appendChild(panel);
+    document.getElementById('game-container').appendChild(modal);
+  }
+  _buildTreeModal() {
+    const modal = el('div', 'modal hidden');
+    modal.id = 'tree-modal';
+    const panel = el('div', 'panel modal-panel');
+    const h = el('h2');
+    h.setAttribute('data-i18n', 'plantTreeWhat');
+    h.textContent = t('plantTreeWhat', this.lang);
+    panel.appendChild(h);
+    const list = el('div');
+    list.id = 'tree-list';
+    panel.appendChild(list);
+    const close = el('button', 'primary-btn', t('cancel', this.lang));
+    close.id = 'btn-close-tree';
+    close.setAttribute('data-i18n', 'cancel');
+    close.addEventListener('click', () => this.closeTreePicker());
+    panel.appendChild(close);
+    modal.appendChild(panel);
+    document.getElementById('game-container').appendChild(modal);
+  }
+  // COZY-C — end
   setLang(lang) {
     this.lang = lang;
     applyI18n(lang);
@@ -317,18 +396,44 @@ export class UI {
     const bar = $('inv-bar');
     while (bar.firstChild) bar.removeChild(bar.firstChild);
     const inv = state.inv;
-    const add = (iconName, n, label) => {
+    // COZY-C: chip ikut menampilkan kualitas (Bagus/Langka) bila ada, dan
+    // satu chip pasar di ujung: barang paling dicari hari ini (×1,5).
+    // Semua chip tetap .inv-chip yang sama — tanpa CSS baru, tanpa tabrakan
+    // di 390px (inv-bar sudah flex-wrap + disembunyikan di layar pendek).
+    const qStr = (id) => {
+      const q = state.invQ && state.invQ[id];
+      if (!q) return '';
+      const parts = [];
+      if (q.good > 0) parts.push(`${t('qualityGood', this.lang)} ×${q.good}`);
+      if (q.rare > 0) parts.push(`${t('qualityRare', this.lang)} ×${q.rare}`);
+      return parts.length ? ` (${parts.join(' • ')})` : '';
+    };
+    const add = (iconName, n, label, qid) => {
       if (n > 0) {
         const chip = el('span', 'inv-chip');
         chip.appendChild(iconEl(iconName));
-        chip.appendChild(document.createTextNode(` ${label} ×${n}`));
+        chip.appendChild(document.createTextNode(` ${label} ×${n}${qid ? qStr(qid) : ''}`));
         bar.appendChild(chip);
       }
     };
     add('sprout', inv.carrotSeed, 'Wortel'); add('sprout', inv.tomatoSeed, 'Tomat'); add('sprout', inv.pumpkinSeed, 'Labu');
+    add('wheat', inv.wheatSeed, t('wheat', this.lang)); add('sprout', inv.strawberrySeed, t('strawberry', this.lang));
     add('wheat', inv.feed, t('feed', this.lang));
-    add('carrot', inv.carrot, 'Wortel'); add('tomato', inv.tomato, 'Tomat'); add('pumpkin', inv.pumpkin, 'Labu');
-    add('egg', inv.egg, 'Telur'); add('milk', inv.milk, 'Susu');
+    add('carrot', inv.carrot, 'Wortel', 'carrot'); add('tomato', inv.tomato, 'Tomat', 'tomato'); add('pumpkin', inv.pumpkin, 'Labu', 'pumpkin');
+    add('wheat', inv.wheat, t('wheat', this.lang), 'wheat'); add('tomato', inv.strawberry, t('strawberry', this.lang), 'strawberry');
+    add('tomato', inv.apple, t('apple', this.lang), 'apple'); add('pumpkin', inv.orange, t('orange', this.lang), 'orange');
+    add('egg', inv.egg, 'Telur', 'egg'); add('milk', inv.milk, 'Susu', 'milk');
+    // COZY-D — NPC + Sosial: Telur Emas (barang langka pedagang keliling).
+    add('egg', inv.goldenEgg, 'Telur Emas');
+    add('milk', inv.cheese, t('cheese', this.lang)); add('tomato', inv.sauce, t('sauce', this.lang)); add('wheat', inv.flour, t('flour', this.lang));
+    add('leaf', inv.fertiliser, t('fertiliser', this.lang));
+    add('tomato', inv.appleSapling, t('saplingApple', this.lang)); add('pumpkin', inv.orangeSapling, t('saplingOrange', this.lang));
+    const dmd = demandFor(state.day);
+    const multTxt = this.lang === 'id' ? '×1,5' : '×1.5';
+    const marketChip = el('span', 'inv-chip');
+    marketChip.appendChild(iconEl('coin'));
+    marketChip.appendChild(document.createTextNode(` ${t('marketTab', this.lang)}: ${dmd.wanted.map((id) => itemName(id, this.lang)).join(' • ')} ${multTxt}`));
+    bar.appendChild(marketChip);
     this._setShopCoins(state.coins);
     this._drawMinimap();
   }
@@ -679,6 +784,10 @@ export class UI {
   openRoom() {
     this._renderRoomState();
     this._renderRoomChat();
+    // COZY-E — start: bangun seksi ekonomi bareng + cek ketersediaan server.
+    this._ensureMpEco();
+    if (typeof this.h.onRoomOpened === 'function') this.h.onRoomOpened();
+    // COZY-E — end
     $('room-modal').classList.remove('hidden');
   }
   closeRoom() { $('room-modal').classList.add('hidden'); }
@@ -760,6 +869,19 @@ export class UI {
       const name = el('span', 'room-player-name', p.username || '');
       li.appendChild(name);
       if (p.self) li.appendChild(el('span', 'room-player-you', ` (${t('roomYou', this.lang)})`));
+      // COZY-E — start: tombol aksi per pemain lain (Kunjungi / Tukar).
+      if (!p.self && r.inRoom) {
+        const acts = el('span', 'room-player-actions');
+        const btnVisit = el('button', 'primary-btn secondary', t('mpVisit', this.lang));
+        btnVisit.addEventListener('click', () => {
+          if (typeof this.h.onMpVisit === 'function') this.h.onMpVisit(p.username);
+        });
+        const btnTrade = el('button', 'primary-btn secondary', t('mpTrade', this.lang));
+        btnTrade.addEventListener('click', () => this.openMpTrade(p.username));
+        acts.append(btnVisit, btnTrade);
+        li.appendChild(acts);
+      }
+      // COZY-E — end
       list.appendChild(li);
     }
     if (r.players.length === 0) {
@@ -799,6 +921,485 @@ export class UI {
     }
     log.scrollTop = log.scrollHeight;
   }
+
+  // ---------- COZY-D — NPC + Sosial: dialog + panel warga ----------
+  // Semua DOM dibangun dinamis di sini (index.html di luar batas lane).
+  // Memakai kelas yang sudah ada (.modal/.panel/.primary-btn/.shop-row)
+  // + token warna proyek — tanpa CSS baru, tanpa innerHTML dari data
+  // pemain (semua teks via textContent). Dialog = modal; panel warga =
+  // modal dengan daftar pertemanan + quest.
+  _ensureNpcDom() {
+    if (this._npcDlg) return;
+    const mkModal = (id) => {
+      const m = el('div', 'modal hidden');
+      m.id = id;
+      const p = el('div', 'panel modal-panel');
+      m.appendChild(p);
+      document.getElementById('game-container').appendChild(m);
+      return { m, p };
+    };
+    const dlg = mkModal('npc-dialogue-modal');
+    const panel = mkModal('npc-panel-modal');
+    this._npcDlg = dlg;
+    this._npcPanel = panel;
+    this._dlg = null; // { npcId, nodeId }
+  }
+  openDialogue(npcId) {
+    this._ensureNpcDom();
+    const node = typeof this.h.onNpcTalk === 'function' ? this.h.onNpcTalk(npcId) : null;
+    if (!node) return;
+    this._dlg = { npcId, nodeId: node.nodeId };
+    this._renderDialogue(node);
+    this._npcDlg.m.classList.remove('hidden');
+  }
+  closeDialogue() {
+    if (this._npcDlg) this._npcDlg.m.classList.add('hidden');
+    if (typeof this.h.onNpcEndTalk === 'function') this.h.onNpcEndTalk();
+    this._dlg = null;
+  }
+  _dlgText(obj) {
+    if (!obj) return '';
+    if (typeof obj === 'string') return obj;
+    return obj[this.lang] || obj.id || '';
+  }
+  _renderDialogue(node) {
+    const { p } = this._npcDlg;
+    while (p.firstChild) p.removeChild(p.firstChild);
+    p.appendChild(el('h2', null, node.speaker || ''));
+    const job = node.job ? this._dlgText(node.job) : '';
+    if (job) {
+      const j = el('p', 'room-desc', job);
+      p.appendChild(j);
+    }
+    const body = el('p', 'room-desc', this._dlgText(node.text));
+    body.style.color = 'var(--lh-ink)';
+    body.style.fontWeight = '600';
+    p.appendChild(body);
+    const wrap = el('div', 'row-btns');
+    wrap.style.flexDirection = 'column';
+    for (let i = 0; i < (node.choices || []).length; i++) {
+      const c = node.choices[i];
+      const b = el('button', 'primary-btn', this._dlgText(c.label));
+      b.style.width = '100%';
+      b.addEventListener('click', () => this._dlgChoice(i));
+      wrap.appendChild(b);
+    }
+    p.appendChild(wrap);
+    this._dlg = { npcId: node.npcId, nodeId: node.nodeId };
+  }
+  _dlgChoice(idx) {
+    if (!this._dlg) return;
+    const { npcId, nodeId } = this._dlg;
+    const res = typeof this.h.onNpcChoice === 'function'
+      ? this.h.onNpcChoice(npcId, nodeId, idx) : { action: 'close' };
+    if (res.action === 'close') { this.closeDialogue(); return; }
+    if (res.action === 'gift') { this._renderGiftView(npcId); return; }
+    if (res.action === 'shop') { this._renderMerchantView(npcId); return; }
+    if (res.action === 'node' && res.node) { this._renderDialogue(res.node); return; }
+    this.closeDialogue();
+  }
+  _dlgBack(npcId) {
+    const node = typeof this.h.onNpcRoot === 'function' ? this.h.onNpcRoot(npcId) : null;
+    if (node) this._renderDialogue(node);
+    else this.closeDialogue();
+  }
+  _renderGiftView(npcId) {
+    const { p } = this._npcDlg;
+    while (p.firstChild) p.removeChild(p.firstChild);
+    p.appendChild(el('h2', null, t('npcGift', this.lang)));
+    const list = typeof this.h.onNpcGiftables === 'function' ? this.h.onNpcGiftables() : [];
+    if (!list.length) {
+      p.appendChild(el('p', 'room-desc', t('npcNoGift', this.lang)));
+    } else {
+      for (const g of list) {
+        const def = GIFTABLE.find((x) => x.key === g.key) || { name: { id: g.key, en: g.key } };
+        const row = el('div', 'shop-row');
+        const info = el('div', 'info');
+        info.appendChild(el('div', 'name', `${this._dlgText(def.name)} ×${g.owned}`));
+        row.appendChild(info);
+        const b = el('button', 'buy-btn', t('npcGift', this.lang));
+        b.addEventListener('click', () => {
+          const r = this.h.onNpcGift(npcId, g.key);
+          if (r && r.ok) this._dlgBack(npcId);
+          else this._renderGiftView(npcId);
+        });
+        row.appendChild(b);
+        p.appendChild(row);
+      }
+    }
+    const back = el('button', 'primary-btn secondary', t('cancel', this.lang));
+    back.addEventListener('click', () => this._dlgBack(npcId));
+    const wrap = el('div', 'row-btns');
+    wrap.appendChild(back);
+    p.appendChild(wrap);
+  }
+  _renderMerchantView(npcId) {
+    const { p } = this._npcDlg;
+    while (p.firstChild) p.removeChild(p.firstChild);
+    p.appendChild(el('h2', null, t('npcMerchantShop', this.lang)));
+    const coins = this._lastState ? this._lastState.coins : 0;
+    for (const item of MERCHANT_STOCK) {
+      const row = el('div', 'shop-row');
+      const info = el('div', 'info');
+      info.appendChild(el('div', 'name', this._dlgText(item.name)));
+      const sub = el('div', 'sub');
+      appendRichText(sub, `${item.price} {coin}`);
+      info.appendChild(sub);
+      row.appendChild(info);
+      const b = el('button', 'buy-btn', t('buy', this.lang));
+      b.disabled = coins < item.price;
+      b.addEventListener('click', () => {
+        const r = this.h.onNpcBuy(item.key);
+        if (r && r.ok) { this.updateHUD(this._lastState); this._renderMerchantView(npcId); }
+      });
+      row.appendChild(b);
+      p.appendChild(row);
+    }
+    const back = el('button', 'primary-btn secondary', t('cancel', this.lang));
+    back.addEventListener('click', () => this._dlgBack(npcId));
+    const wrap = el('div', 'row-btns');
+    wrap.appendChild(back);
+    p.appendChild(wrap);
+  }
+  openNpcPanel() {
+    this._ensureNpcDom();
+    const data = typeof this.h.onNpcPanelData === 'function' ? this.h.onNpcPanelData() : null;
+    if (!data) return;
+    const { p } = this._npcPanel;
+    while (p.firstChild) p.removeChild(p.firstChild);
+    p.appendChild(el('h2', null, t('npcPanelTitle', this.lang)));
+    // Status festival + pedagang.
+    const fest = data.festival.active
+      ? t('npcFestivalToday', this.lang)
+      : t('npcFestivalNext', this.lang, { d: data.festival.day + (7 - (data.festival.day % 7)) });
+    p.appendChild(el('p', 'room-desc', fest));
+    const merch = data.merchant.present
+      ? t('npcMerchantHere', this.lang)
+      : t('npcMerchantNext', this.lang, { d: data.merchant.nextDay });
+    const merchEl = el('p', 'room-desc', merch);
+    merchEl.style.fontWeight = '700';
+    p.appendChild(merchEl);
+    // Daftar warga + pertemanan.
+    p.appendChild(el('h3', 'room-section-title', t('npcFriends', this.lang)));
+    for (const n of data.npcs) {
+      const row = el('div', 'shop-row');
+      const info = el('div', 'info');
+      info.appendChild(el('div', 'name', `${n.name} — ${this._dlgText(n.job)}`));
+      const lvlKey = n.level === 2 ? 'npcLvl2' : n.level === 1 ? 'npcLvl1' : 'npcLvl0';
+      const likes = n.likes.map((k) => {
+        const g = GIFTABLE.find((x) => x.key === k);
+        return g ? this._dlgText(g.name) : k;
+      }).join(', ');
+      const sub = el('div', 'sub', `${t(lvlKey, this.lang)} • ${n.fp} pts${n.giftedToday ? ` • ${t('npcGiftedToday', this.lang)}` : ''} • ${t('npcLikes', this.lang, { items: likes })}`);
+      info.appendChild(sub);
+      row.appendChild(info);
+      p.appendChild(row);
+    }
+    // Quest harian + mingguan.
+    const questSection = (titleKey, list) => {
+      p.appendChild(el('h3', 'room-section-title', t(titleKey, this.lang)));
+      if (!list.length) {
+        p.appendChild(el('p', 'room-desc', '—'));
+        return;
+      }
+      for (const q of list) {
+        const row = el('div', 'shop-row');
+        const info = el('div', 'info');
+        info.appendChild(el('div', 'name', this._dlgText(q.text)));
+        const sub = el('div', 'sub',
+          q.done ? t('npcQuestDoneShort', this.lang)
+            : `${q.progress}/${q.need} • ${t('npcQuestReward', this.lang, { n: q.reward ? q.reward.coins : 0 })}`);
+        info.appendChild(sub);
+        row.appendChild(info);
+        p.appendChild(row);
+      }
+    };
+    questSection('npcDaily', data.daily);
+    questSection('npcWeekly', data.weekly);
+    const close = el('button', 'primary-btn', t('close', this.lang));
+    close.addEventListener('click', () => this.closeNpcPanel());
+    const wrap = el('div', 'row-btns');
+    wrap.appendChild(close);
+    p.appendChild(wrap);
+    this._npcPanel.m.classList.remove('hidden');
+  }
+  closeNpcPanel() {
+    if (this._npcPanel) this._npcPanel.m.classList.add('hidden');
+  }
+  // ---------- COZY-D end ----------
+  // ---------- COZY-E — Ekonomi multiplayer di dalam modal room ----------
+  // Semua seksi dibangun dinamis di sini (tidak ada markup baru di
+  // index.html): panel memakai class yang sudah ada (.room-section-title,
+  // .primary-btn, .room-players) + warna token --lh-*; grid kebun adalah
+  // visualnya (kotak tanah/tanaman, bukan kartu statistik). Semua data
+  // pemain dirender via textContent. Bila endpoint server belum ada (404)
+  // seksi menampilkan "segera hadir" dan tombol dimatikan — game tetap jalan.
+  _mpItemLabel(item) {
+    const key = 'mpItem' + item[0].toUpperCase() + item.slice(1);
+    return t(key, this.lang);
+  }
+  _mpCropColor(crop) {
+    return { carrot: '#e87a2a', tomato: '#d9382b', pumpkin: '#e8912a' }[crop] || '#6e4a26';
+  }
+  _ensureMpEco() {
+    if (this._mpEcoBuilt) { this._renderMpEcoStatus(); return; }
+    this._mpEcoBuilt = true;
+    this._mpAvailable = null; // null=belum tahu, true=ada, false=segera hadir
+    const panel = document.querySelector('#room-modal .room-panel');
+    const closeBtn = $('btn-close-room');
+    const wrap = el('div', 'mp-eco');
+    wrap.id = 'mp-eco';
+    const title = el('h3', 'room-section-title', t('mpEcoTitle', this.lang));
+    this._mpStatus = el('p', 'room-status');
+    const btnRow = el('div', 'row-btns');
+    this._mpGameBtn = el('button', 'primary-btn', t('mpGameStart', this.lang));
+    this._mpGameBtn.id = 'btn-mp-game';
+    this._mpGameBtn.addEventListener('click', () => {
+      if (typeof this.h.onMpGameStart === 'function') this.h.onMpGameStart();
+    });
+    this._mpBoardBtn = el('button', 'primary-btn secondary', t('mpLeaderboard', this.lang));
+    this._mpBoardBtn.id = 'btn-mp-board';
+    this._mpBoardBtn.addEventListener('click', () => {
+      if (typeof this.h.onMpLeaderboard === 'function') this.h.onMpLeaderboard();
+    });
+    btnRow.append(this._mpGameBtn, this._mpBoardBtn);
+    // Panel minigame "Panen Cepat".
+    this._mpGamePanel = el('div', 'mp-game-panel hidden');
+    this._mpGamePanel.id = 'mp-game-panel';
+    this._mpGameTitle = el('p', 'room-status', t('mpGameTitle', this.lang));
+    this._mpGameTime = el('p', 'room-status');
+    this._mpGameScore = el('p', 'room-status', t('mpGameScore', this.lang, { n: 0 }));
+    this._mpGameTap = el('button', 'primary-btn', t('mpGameTap', this.lang));
+    this._mpGameTap.style.fontSize = '28px';
+    this._mpGameTap.style.minHeight = '64px';
+    this._mpGameTap.style.width = '100%';
+    this._mpGameTap.addEventListener('click', () => {
+      if (typeof this.h.onMpGameTap === 'function') {
+        const s = this.h.onMpGameTap();
+        this._mpGameScore.textContent = t('mpGameScore', this.lang, { n: s });
+      }
+    });
+    this._mpGameStandings = el('ul', 'room-players');
+    this._mpGameResult = el('p', 'room-status');
+    this._mpGamePanel.append(
+      this._mpGameTitle, this._mpGameTime, this._mpGameScore,
+      this._mpGameTap, this._mpGameStandings, this._mpGameResult,
+    );
+    // Daftar peringkat.
+    this._mpBoardList = el('ul', 'room-players');
+    this._mpBoardList.id = 'mp-board-list';
+    // Snapshot kebun yang dikunjungi (grid 6x4 + hewan).
+    this._mpGardenPanel = el('div', 'mp-garden-panel hidden');
+    this._mpGardenPanel.id = 'mp-garden-panel';
+    this._mpGardenTitle = el('p', 'room-status');
+    this._mpGardenGrid = el('div', 'mp-garden-grid');
+    this._mpGardenGrid.style.display = 'grid';
+    this._mpGardenGrid.style.gridTemplateColumns = 'repeat(6, 1fr)';
+    this._mpGardenGrid.style.gap = '4px';
+    this._mpGardenGrid.style.maxWidth = '360px';
+    this._mpGardenAnimals = el('p', 'room-status');
+    this._mpGardenPanel.append(this._mpGardenTitle, this._mpGardenGrid, this._mpGardenAnimals);
+    // Panel tukar (pilih item + jumlah).
+    this._mpTradePanel = el('div', 'mp-trade-panel hidden');
+    this._mpTradePanel.id = 'mp-trade-panel';
+    this._mpTradeTitle = el('p', 'room-status');
+    const giveRow = el('div', 'room-chat-row');
+    giveRow.appendChild(el('span', 'room-player-name', t('mpTradeGive', this.lang)));
+    this._mpGiveSel = document.createElement('select');
+    this._mpGiveQty = document.createElement('input');
+    this._mpGiveQty.type = 'number'; this._mpGiveQty.min = '1'; this._mpGiveQty.max = '99';
+    this._mpGiveQty.value = '1'; this._mpGiveQty.setAttribute('aria-label', t('mpTradeGive', this.lang));
+    giveRow.append(this._mpGiveSel, this._mpGiveQty);
+    const wantRow = el('div', 'room-chat-row');
+    wantRow.appendChild(el('span', 'room-player-name', t('mpTradeWant', this.lang)));
+    this._mpWantSel = document.createElement('select');
+    this._mpWantQty = document.createElement('input');
+    this._mpWantQty.type = 'number'; this._mpWantQty.min = '1'; this._mpWantQty.max = '99';
+    this._mpWantQty.value = '1'; this._mpWantQty.setAttribute('aria-label', t('mpTradeWant', this.lang));
+    wantRow.append(this._mpWantSel, this._mpWantQty);
+    this._mpTradeBtn = el('button', 'primary-btn', t('mpTradePropose', this.lang));
+    this._mpTradeBtn.addEventListener('click', () => {
+      if (typeof this.h.onMpTradePropose !== 'function') return;
+      const offer = { item: this._mpGiveSel.value, qty: Math.max(1, Math.min(99, Number(this._mpGiveQty.value) || 1)) };
+      const want = { item: this._mpWantSel.value, qty: Math.max(1, Math.min(99, Number(this._mpWantQty.value) || 1)) };
+      const inv = typeof this.h.getMpInv === 'function' ? this.h.getMpInv() : {};
+      if ((inv[offer.item] || 0) < offer.qty) { this.toast(t('mpTradeNeedItem', this.lang)); return; }
+      this.h.onMpTradePropose(this._mpTradeTarget, offer, want);
+    });
+    this._mpTradePending = el('p', 'room-status');
+    this._mpTradePanel.append(this._mpTradeTitle, giveRow, wantRow, this._mpTradeBtn, this._mpTradePending);
+    // Panel tawaran masuk (terima / tolak).
+    this._mpOfferPanel = el('div', 'mp-offer-panel hidden');
+    this._mpOfferPanel.id = 'mp-offer-panel';
+    this._mpOfferText = el('p', 'room-status');
+    const offerRow = el('div', 'row-btns');
+    this._mpOfferAccept = el('button', 'primary-btn', t('mpTradeAccept', this.lang));
+    this._mpOfferAccept.addEventListener('click', () => {
+      if (this._mpOffer && typeof this.h.onMpTradeAccept === 'function') this.h.onMpTradeAccept(this._mpOffer.offerId);
+    });
+    this._mpOfferDecline = el('button', 'primary-btn secondary', t('mpTradeDecline', this.lang));
+    this._mpOfferDecline.addEventListener('click', () => {
+      if (this._mpOffer && typeof this.h.onMpTradeDecline === 'function') this.h.onMpTradeDecline(this._mpOffer.offerId);
+    });
+    offerRow.append(this._mpOfferAccept, this._mpOfferDecline);
+    this._mpOfferPanel.append(this._mpOfferText, offerRow);
+    wrap.append(
+      title, this._mpStatus, btnRow, this._mpGamePanel,
+      this._mpBoardList, this._mpGardenPanel, this._mpTradePanel, this._mpOfferPanel,
+    );
+    panel.insertBefore(wrap, closeBtn);
+    this._renderMpEcoStatus();
+  }
+  _renderMpEcoStatus() {
+    if (!this._mpStatus) return;
+    const loggedIn = typeof this.h.getMpSession === 'function' ? this.h.getMpSession() : false;
+    if (this._mpAvailable === false) {
+      this._mpStatus.textContent = t('mpComingSoon', this.lang);
+    } else if (!loggedIn) {
+      this._mpStatus.textContent = t('mpNeedLogin', this.lang);
+    } else {
+      this._mpStatus.textContent = '';
+    }
+    const disabled = this._mpAvailable === false || !loggedIn;
+    if (this._mpGameBtn) this._mpGameBtn.disabled = disabled;
+    if (this._mpBoardBtn) this._mpBoardBtn.disabled = disabled;
+  }
+  setMpAvailable(avail) {
+    this._mpAvailable = !!avail;
+    this._renderMpEcoStatus();
+  }
+  showMpGarden(garden, visit) {
+    this._ensureMpEco();
+    this._mpGardenTitle.textContent = `${garden.username} — ${t('mpGardenDay', this.lang, { d: garden.day })}`;
+    while (this._mpGardenGrid.firstChild) this._mpGardenGrid.removeChild(this._mpGardenGrid.firstChild);
+    for (const p of garden.plots || []) {
+      const cell = el('div', 'mp-plot');
+      cell.style.aspectRatio = '1';
+      cell.style.border = '2px solid #1d2b53';
+      cell.style.borderRadius = '6px';
+      cell.style.backgroundColor = p.crop ? this._mpCropColor(p.crop) : (p.hoed ? '#4a2f16' : '#6e4a26');
+      cell.style.opacity = p.crop ? String(0.55 + 0.15 * (p.growth || 0)) : '1';
+      cell.style.display = 'flex';
+      cell.style.alignItems = 'center';
+      cell.style.justifyContent = 'center';
+      cell.style.color = '#fff6e5';
+      cell.style.fontWeight = '800';
+      cell.textContent = p.crop ? String(p.growth || 0) : '';
+      cell.title = p.crop ? `${this._mpItemLabel(p.crop)} ${p.growth || 0}` : '';
+      this._mpGardenGrid.appendChild(cell);
+    }
+    const byKind = {};
+    for (const a of garden.animals || []) {
+      byKind[a.kind] = byKind[a.kind] || { n: 0, ready: 0 };
+      byKind[a.kind].n += 1;
+      byKind[a.kind].ready += a.ready || 0;
+    }
+    const kindName = { ayam: { id: 'Ayam', en: 'Chicken' }, sapi: { id: 'Sapi', en: 'Cow' } };
+    const parts = Object.entries(byKind).map(([k, v]) => {
+      const nm = (kindName[k] || { id: k, en: k })[this.lang] || k;
+      return `${nm} ×${v.n} (${v.ready} ${t('mpReady', this.lang)})`;
+    });
+    this._mpGardenAnimals.textContent = parts.length
+      ? parts.join(' • ')
+      : t('mpGardenAnimals', this.lang, { n: 0 });
+    this._mpGardenPanel.classList.remove('hidden');
+  }
+  openMpTrade(username) {
+    this._ensureMpEco();
+    this._mpTradeTarget = username;
+    this._mpTradeTitle.textContent = `${t('mpTrade', this.lang)} — ${username}`;
+    const inv = typeof this.h.getMpInv === 'function' ? this.h.getMpInv() : {};
+    for (const sel of [this._mpGiveSel, this._mpWantSel]) {
+      while (sel.firstChild) sel.removeChild(sel.firstChild);
+      for (const item of MP_ECO_TRADE_ITEMS) {
+        const opt = document.createElement('option');
+        opt.value = item;
+        opt.textContent = sel === this._mpGiveSel
+          ? `${this._mpItemLabel(item)} (${inv[item] || 0})`
+          : this._mpItemLabel(item);
+        sel.appendChild(opt);
+      }
+    }
+    const firstOwned = MP_ECO_TRADE_ITEMS.find((it) => (inv[it] || 0) > 0);
+    if (firstOwned) this._mpGiveSel.value = firstOwned;
+    this._mpTradePending.textContent = '';
+    this._mpTradePanel.classList.remove('hidden');
+  }
+  setMpTradePending(pending) {
+    if (!this._mpTradePanel) return;
+    this._mpTradePending.textContent = pending
+      ? t('mpTradePending', this.lang, { u: pending.to })
+      : '';
+  }
+  showMpTradeOffer(offer) {
+    this._ensureMpEco();
+    this._mpOffer = offer;
+    const give = `${offer.offer.qty} ${this._mpItemLabel(offer.offer.item)}`;
+    const want = `${offer.want.qty} ${this._mpItemLabel(offer.want.item)}`;
+    this._mpOfferText.textContent = `${t('mpTradeOfferFrom', this.lang, { u: offer.from })} ${give} ↔ ${want}`;
+    this._mpOfferPanel.classList.remove('hidden');
+  }
+  hideMpTradeOffer() {
+    this._mpOffer = null;
+    if (this._mpOfferPanel) this._mpOfferPanel.classList.add('hidden');
+  }
+  showMpGame(room, endsAt) {
+    this._ensureMpEco();
+    this._mpGameEndsAt = endsAt;
+    this._mpGameScore.textContent = t('mpGameScore', this.lang, { n: 0 });
+    this._mpGameResult.textContent = '';
+    while (this._mpGameStandings.firstChild) this._mpGameStandings.removeChild(this._mpGameStandings.firstChild);
+    this._mpGamePanel.classList.remove('hidden');
+    if (this._mpGameTick) clearInterval(this._mpGameTick);
+    this._mpGameTick = setInterval(() => {
+      if (!this._mpGameEndsAt) return;
+      const left = Math.max(0, Math.ceil((this._mpGameEndsAt - Date.now()) / 1000));
+      this._mpGameTime.textContent = t('mpGameTime', this.lang, { n: left });
+      if (left <= 0) {
+        clearInterval(this._mpGameTick);
+        this._mpGameTick = null;
+        this._mpGameTime.textContent = t('mpGameWaiting', this.lang);
+      }
+    }, 250);
+  }
+  setMpGameScores(scores) {
+    if (!this._mpGameStandings) return;
+    while (this._mpGameStandings.firstChild) this._mpGameStandings.removeChild(this._mpGameStandings.firstChild);
+    const rows = Object.entries(scores || {}).sort((a, b) => b[1] - a[1]);
+    for (const [u, s] of rows) {
+      this._mpGameStandings.appendChild(el('li', 'room-player', `${u} — ${s}`));
+    }
+  }
+  showMpGameResults(data) {
+    this._ensureMpEco();
+    if (this._mpGameTick) { clearInterval(this._mpGameTick); this._mpGameTick = null; }
+    this._mpGameTime.textContent = '';
+    const lines = [];
+    if (data.winner) lines.push(t('mpGameWinner', this.lang, { u: data.winner }));
+    if (data.reward > 0) lines.push(t('mpGameReward', this.lang, { n: data.reward }));
+    if (typeof data.score === 'number') {
+      lines.push(t('mpGameScore', this.lang, { n: data.score }));
+    }
+    if (Array.isArray(data.scores) && data.scores.length) {
+      lines.push(data.scores.map((r) => `${r.username} ${r.score}`).join(' • '));
+    }
+    this._mpGameResult.textContent = lines.join(' — ');
+    this._mpGamePanel.classList.remove('hidden');
+  }
+  showMpLeaderboard(board) {
+    this._ensureMpEco();
+    while (this._mpBoardList.firstChild) this._mpBoardList.removeChild(this._mpBoardList.firstChild);
+    if (!board || board.length === 0) {
+      this._mpBoardList.appendChild(el('li', 'room-player room-player-empty', t('mpLeaderboardEmpty', this.lang)));
+      return;
+    }
+    board.forEach((row, i) => {
+      const li = el('li', 'room-player',
+        `${i + 1}. ${row.username} — ${row.coins} ${t('mpCoins', this.lang)} • ${t('mpLeaderboardTrades', this.lang, { n: row.trades || 0 })}`);
+      this._mpBoardList.appendChild(li);
+    });
+  }
+  // COZY-E — end
 
   // ---------- Akun ----------
   setAuthMode(mode) {
@@ -966,28 +1567,71 @@ export class UI {
     this._shopState = state;
     $('tab-buy').classList.toggle('active', this._shopTab === 'buy');
     $('tab-sell').classList.toggle('active', this._shopTab === 'sell');
+    // COZY-C: tab Pasar ikut aktif bila dipilih (tombol dibuat di _bind).
+    const tabMarket = $('tab-market');
+    if (tabMarket) tabMarket.classList.toggle('active', this._shopTab === 'market');
     const box = $('shop-items');
     while (box.firstChild) box.removeChild(box.firstChild);
+    // COZY-C: harga jual dihitung dinamis (dasar × kualitas terbaik ×
+    // permintaan hari ini) — bukan lagi c.sell / angka hardcoded 8/15.
+    const sellRowFor = (id, iconName, owned) => {
+      const price = sellPrice(id, bestUnit(state.inv, state.invQ, id), state.day);
+      const q = state.invQ && state.invQ[id];
+      const qNote = q && (q.good > 0 || q.rare > 0)
+        ? ` • ${q.good > 0 ? `${t('qualityGood', this.lang)} ×${q.good}` : ''}${q.good > 0 && q.rare > 0 ? ' • ' : ''}${q.rare > 0 ? `${t('qualityRare', this.lang)} ×${q.rare}` : ''}`
+        : '';
+      return {
+        key: id, icon: iconName, name: itemName(id, this.lang),
+        sub: `${price} {coin} / 1${qNote}`,
+        price, owned,
+      };
+    };
     if (this._shopTab === 'buy') {
       const items = [
         ...Object.values(CROPS).map((c) => ({
           key: c.seedKey, icon: c.icon, name: `${t('seeds', this.lang)} ${c.name}`,
-          sub: `${c.days} ${this.lang === 'id' ? 'hari' : 'days'} • ${this.lang === 'id' ? 'jual' : 'sells'} ${c.sell} {coin}`,
+          sub: `${c.days} ${this.lang === 'id' ? 'hari' : 'days'} • ${this.lang === 'id' ? 'jual' : 'sells'} ${sellPrice(c.id, 'normal', state.day)} {coin}`,
           price: c.seed, owned: state.inv[c.seedKey] || 0,
         })),
         { key: 'feed', icon: 'wheat', name: t('feed', this.lang),
           sub: this.lang === 'id' ? '1 pakan = 1 ekor/hari' : '1 feed = 1 animal/day',
           price: 2, owned: state.inv.feed || 0 },
+        // COZY-C: pupuk + bibit pohon (beli di sini, dipakai di kebun).
+        { key: 'fertiliser', icon: 'leaf', name: t('fertiliser', this.lang),
+          sub: this.lang === 'id' ? 'Tanah +25 • tumbuh lebih cepat • panen lebih bagus' : 'Soil +25 • grows faster • better harvest',
+          price: FERTILISER.price, owned: state.inv.fertiliser || 0 },
+        { key: 'appleSapling', icon: 'tomato', name: t('saplingApple', this.lang),
+          sub: this.lang === 'id' ? 'Pohon apel — berbuah dalam 2 hari, panen tiap hari' : 'Apple tree — fruits in 2 days, harvest daily',
+          price: SAPLINGS.apple.price, owned: state.inv.appleSapling || 0 },
+        { key: 'orangeSapling', icon: 'pumpkin', name: t('saplingOrange', this.lang),
+          sub: this.lang === 'id' ? 'Pohon jeruk — berbuah dalam 2 hari, panen tiap hari' : 'Orange tree — fruits in 2 days, harvest daily',
+          price: SAPLINGS.orange.price, owned: state.inv.orangeSapling || 0 },
       ];
       for (const it of items) this._shopRow(box, it, 'buy');
+    } else if (this._shopTab === 'market') {
+      // COZY-C: tab Pasar — barang paling dicari dulu (×1,5), lalu sisanya
+      // dengan harga hari ini. Semua baris bisa langsung dijual.
+      const dmd = demandFor(state.day);
+      const wantedRows = dmd.wanted.map((id) => {
+        const r = sellRowFor(id, itemIcon(id), state.inv[id] || 0);
+        // marketDemandUp SUDAH berisi 'Dicari ×1,5' — jangan tambah lagi.
+        r.sub = `${r.price} {coin} / 1 • ${t('marketDemandUp', this.lang)}`;
+        return r;
+      });
+      const restRows = ['carrot', 'tomato', 'pumpkin', 'wheat', 'strawberry', 'apple', 'orange', 'egg', 'milk', 'cheese', 'sauce', 'flour']
+        .filter((id) => !dmd.wanted.includes(id))
+        .map((id) => sellRowFor(id, itemIcon(id), state.inv[id] || 0));
+      for (const it of [...wantedRows, ...restRows]) this._shopRow(box, it, 'sell');
     } else {
       const items = [
-        ...Object.values(CROPS).map((c) => ({
-          key: c.id, icon: c.icon, name: c.name, sub: `${c.sell} {coin} / 1`,
-          price: c.sell, owned: state.inv[c.id] || 0,
-        })),
-        { key: 'egg', icon: 'egg', name: ANIMAL_DEFS.ayam.produceName, sub: '8 {coin} / 1', price: 8, owned: state.inv.egg || 0 },
-        { key: 'milk', icon: 'milk', name: ANIMAL_DEFS.sapi.produceName, sub: '15 {coin} / 1', price: 15, owned: state.inv.milk || 0 },
+        ...Object.values(CROPS).map((c) => sellRowFor(c.id, c.icon, state.inv[c.id] || 0)),
+        sellRowFor('egg', 'egg', state.inv.egg || 0),
+        sellRowFor('milk', 'milk', state.inv.milk || 0),
+        sellRowFor('apple', 'tomato', state.inv.apple || 0),
+        sellRowFor('orange', 'pumpkin', state.inv.orange || 0),
+        sellRowFor('cheese', 'milk', state.inv.cheese || 0),
+        sellRowFor('sauce', 'tomato', state.inv.sauce || 0),
+        sellRowFor('flour', 'wheat', state.inv.flour || 0),
       ];
       for (const it of items) this._shopRow(box, it, 'sell');
     }
@@ -1033,7 +1677,8 @@ export class UI {
       info.appendChild(nameEl);
       const subEl = el('div', 'sub');
       appendRichText(subEl,
-        `${c.days} ${this.lang === 'id' ? 'hari' : 'days'} • ${this.lang === 'id' ? 'jual' : 'sell'} ${c.sell} {coin} • ${this.lang === 'id' ? 'benih' : 'seeds'}: ${owned}`);
+        // COZY-C: harga jual yang tampil = harga hari ini (ikut permintaan).
+        `${c.days} ${this.lang === 'id' ? 'hari' : 'days'} • ${this.lang === 'id' ? 'jual' : 'sell'} ${sellPrice(c.id, 'normal', state.day)} {coin} • ${this.lang === 'id' ? 'benih' : 'seeds'}: ${owned}`);
       info.appendChild(subEl);
       row.appendChild(info);
       const btn = el('button', 'buy-btn');
@@ -1050,6 +1695,100 @@ export class UI {
     $('crop-modal').classList.remove('hidden');
   }
   closeCropPicker() { $('crop-modal').classList.add('hidden'); }
+  // COZY-C — start: panel mesin pengolah + picker pohon buah.
+  // Panel olah: 3 resep (susu->keju, tomat->saus, gandum->tepung), olah
+  // instan + cooldown 15 detik (dihitung dari state.machineCooldown).
+  // Timer 1 detik me-refresh countdown selama panel terbuka.
+  openCraft(state) {
+    state = state || this._lastState;
+    if (!state) return;
+    this._craftState = state;
+    this._renderCraft(state);
+    $('craft-modal').classList.remove('hidden');
+    if (this._craftTimer) clearInterval(this._craftTimer);
+    this._craftTimer = setInterval(() => {
+      if ($('craft-modal').classList.contains('hidden')) { clearInterval(this._craftTimer); this._craftTimer = 0; return; }
+      this._renderCraft(this._craftState || this._lastState);
+    }, 1000);
+  }
+  closeCraft() {
+    $('craft-modal').classList.add('hidden');
+    if (this._craftTimer) { clearInterval(this._craftTimer); this._craftTimer = 0; }
+  }
+  refreshCraft(state) {
+    if ($('craft-modal') && !$('craft-modal').classList.contains('hidden')) {
+      this._craftState = state || this._craftState || this._lastState;
+      this._renderCraft(this._craftState);
+    }
+  }
+  _renderCraft(state) {
+    if (!state) return;
+    const box = $('craft-list');
+    if (!box) return;
+    while (box.firstChild) box.removeChild(box.firstChild);
+    const now = Date.now();
+    const remainMs = Math.max(0, (state.machineCooldown || 0) - now);
+    const note = $('craft-note');
+    if (note) {
+      note.textContent = remainMs > 0
+        ? t('craftCooldown', this.lang, { s: Math.ceil(remainMs / 1000) })
+        : t('craftBonusNote', this.lang);
+    }
+    for (const r of RECIPES) {
+      const outId = Object.keys(r.output)[0];
+      const needTxt = Object.entries(r.inputs)
+        .map(([item, n]) => `${itemName(item, this.lang)} ×${n} (${this.lang === 'id' ? 'punya' : 'owned'} ${state.inv[item] || 0})`)
+        .join(' + ');
+      const canAfford = Object.entries(r.inputs).every(([item, n]) => (state.inv[item] || 0) >= n);
+      const row = el('div', 'shop-row');
+      const info = el('div', 'info');
+      const nameEl = el('div', 'name');
+      nameEl.appendChild(iconEl(itemIcon(outId)));
+      nameEl.appendChild(document.createTextNode(` ${itemName(outId, this.lang)}`));
+      info.appendChild(nameEl);
+      const subEl = el('div', 'sub');
+      appendRichText(subEl, `${t('craftNeed', this.lang, { items: needTxt })} • ${this.lang === 'id' ? 'jual' : 'sells'} ${sellPrice(outId, 'normal', state.day)} {coin}`);
+      info.appendChild(subEl);
+      row.appendChild(info);
+      const btn = el('button', 'buy-btn', t('craftBtn', this.lang));
+      btn.disabled = !canAfford || remainMs > 0;
+      btn.addEventListener('click', () => {
+        if (typeof this.h.onCraft === 'function') this.h.onCraft(r.id);
+      });
+      row.appendChild(btn);
+      box.appendChild(row);
+    }
+  }
+  // Picker bibit pohon (apel/jeruk) — pola yang sama dengan crop picker.
+  openTreePicker(state, onPick) {
+    const box = $('tree-list');
+    while (box.firstChild) box.removeChild(box.firstChild);
+    for (const kind of ['apple', 'orange']) {
+      const def = TREE_DEFS[kind];
+      const key = kind === 'apple' ? 'appleSapling' : 'orangeSapling';
+      const owned = state.inv[key] || 0;
+      const row = el('div', 'crop-row');
+      const info = el('div', 'info');
+      const nameEl = el('div', 'name');
+      nameEl.appendChild(iconEl(def.icon));
+      nameEl.appendChild(document.createTextNode(` ${itemName(kind, this.lang)}`));
+      info.appendChild(nameEl);
+      const subEl = el('div', 'sub');
+      subEl.textContent = this.lang === 'id'
+        ? `Berbuah dalam 2 hari • panen tiap hari • bibit: ${owned}`
+        : `Fruits in 2 days • harvest daily • saplings: ${owned}`;
+      info.appendChild(subEl);
+      row.appendChild(info);
+      const btn = el('button', 'buy-btn', t('actionPlantTree', this.lang));
+      btn.disabled = owned < 1;
+      btn.addEventListener('click', () => { this.closeTreePicker(); onPick(kind); });
+      row.appendChild(btn);
+      box.appendChild(row);
+    }
+    $('tree-modal').classList.remove('hidden');
+  }
+  closeTreePicker() { $('tree-modal').classList.add('hidden'); }
+  // COZY-C — end
   // ---- Tidur / pengaturan
   openSleep() { $('sleep-modal').classList.remove('hidden'); }
   closeSleep() { $('sleep-modal').classList.add('hidden'); }

@@ -186,3 +186,72 @@ export async function cloudHealth() {
     return data && data.ok === true;
   } catch (e) { return false; }
 }
+
+// ---------- COZY-E — Ekonomi multiplayer (server-validated) ----------
+// Semua fungsi di bawah HANYA mengusulkan / membaca dari server; server
+// yang memvalidasi dan menerapkan perubahan (lihat Edge Function seksi
+// COZY-E). Bila server lama (endpoint belum ter-deploy) menjawab 404,
+// lempar error dengan status 404 — pemanggil menampilkan state
+// "segera hadir", game tetap jalan. isMpUnavailable() = penanda itu.
+export function isMpUnavailable(err) {
+  return !!err && (err.status === 404 || err.message === 'mp_unavailable');
+}
+
+// Snapshot kebun publik pemain lain (tanpa koin/inventory — server tidak
+// pernah mengirimnya lewat endpoint ini).
+export async function mpGarden(username) {
+  const s = getSession();
+  if (!s) throw new Error('no_session');
+  return fetchJson(`/api/mp/garden/${encodeURIComponent(username)}`, { token: s.token });
+}
+
+export async function mpTradePropose(to, offer, want) {
+  const s = getSession();
+  if (!s) throw new Error('no_session');
+  return fetchJson('/api/mp/trade/propose', { method: 'POST', body: { to, offer, want }, token: s.token });
+}
+
+export async function mpTradeAccept(offerId) {
+  const s = getSession();
+  if (!s) throw new Error('no_session');
+  return fetchJson('/api/mp/trade/accept', { method: 'POST', body: { offerId }, token: s.token });
+}
+
+export async function mpTradeDecline(offerId) {
+  const s = getSession();
+  if (!s) throw new Error('no_session');
+  return fetchJson('/api/mp/trade/decline', { method: 'POST', body: { offerId }, token: s.token });
+}
+
+// Kunjungi kebun + klaim hadiah sekali-sehari (server yang menegakkan).
+export async function mpVisit(garden) {
+  const s = getSession();
+  if (!s) throw new Error('no_session');
+  return fetchJson('/api/mp/visit', { method: 'POST', body: { garden }, token: s.token });
+}
+
+export async function mpMinigameSubmit(room, score) {
+  const s = getSession();
+  if (!s) throw new Error('no_session');
+  return fetchJson('/api/mp/minigame/submit', { method: 'POST', body: { room, score }, token: s.token });
+}
+
+export async function mpMinigameResults(room) {
+  const s = getSession();
+  if (!s) throw new Error('no_session');
+  return fetchJson(`/api/mp/minigame/results?room=${encodeURIComponent(room)}`, { token: s.token });
+}
+
+export async function mpMinigameClaim(room) {
+  const s = getSession();
+  if (!s) throw new Error('no_session');
+  return fetchJson('/api/mp/minigame/claim', { method: 'POST', body: { room }, token: s.token });
+}
+
+// Peringkat panen — dihitung server dari save tersimpan + ledger trade.
+export async function mpLeaderboard() {
+  const s = getSession();
+  if (!s) throw new Error('no_session');
+  return fetchJson('/api/mp/leaderboard', { token: s.token });
+}
+// COZY-E — end
