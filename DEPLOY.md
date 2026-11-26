@@ -20,7 +20,7 @@ dan harness API Supabase 29 skenario (`supabase/worker-test.mjs`).
 |---|---|---|
 | Game statis (HTML/CSS/JS) | GitHub Pages — https://codermisaki.github.io/lembah-hijau-game/ | Push ke branch `master` (repo `CoderMisaki/lembah-hijau-game`); Pages deploy otomatis, tunggu ±1 menit |
 | Backend API + auth + save | Supabase Edge Function `lembah-hijau-api` — https://ajsliyqjucgdtbimvdtd.supabase.co/functions/v1/lembah-hijau-api | Dashboard Supabase / CLI, lihat `supabase/DEPLOY-SUPABASE.md` |
-| Database | Postgres Supabase (5 tabel: `users`, `sessions`, `saves`, `login_attempts`, `rate_limits`) | SQL Editor, lihat `supabase/DEPLOY-SUPABASE.md` langkah 1 |
+| Database | Postgres Supabase (10 tabel: `users`, `sessions`, `saves`, `login_attempts`, `rate_limits` + `trade_offers`, `trade_ledger`, `visit_ledger`, `minigame_scores` [migrasi 002, ekonomi multiplayer] + `recovery_codes` [migrasi 003, kode pemulihan akun]) | SQL Editor, lihat `supabase/DEPLOY-SUPABASE.md` langkah 1 |
 
 ## 1. Deploy game statis (GitHub Pages)
 
@@ -44,6 +44,11 @@ Langkah lengkap ada di [`supabase/DEPLOY-SUPABASE.md`](supabase/DEPLOY-SUPABASE.
    Editor dashboard, Run. Harus ada 5 tabel di schema `public`.
    RLS aktif di semua tabel TANPA policy (disengaja — hanya Edge
    Function dengan `service_role` yang bisa akses).
+   Lalu, BERURUTAN: `supabase/migrations/002_lembah_hijau_multiplayer.sql`
+   (4 tabel ekonomi multiplayer) dan
+   `supabase/migrations/003_lembah_hijau_recovery.sql`
+   (1 tabel `recovery_codes` — kode pemulihan akun, Wave-3).
+   Total 10 tabel. Semua file aman dijalankan ulang (`IF NOT EXISTS`).
 2. **Edge Function:** buat fungsi **`lembah-hijau-api`**, matikan
    **Verify JWT** (API memakai token sesi sendiri, bukan JWT Supabase
    Auth), paste `supabase/functions/lembah-hijau-api/index.ts`, Deploy.
@@ -80,6 +85,40 @@ node worker-test.mjs
 Lalu di browser: buka URL Pages → Buat Akun → main sebentar → tekan
 💾 Simpan → muat ulang halaman → login lagi → progress + kustomisasi
 harus kembali utuh.
+
+## 4. Wave-3 (Cozy Life Simulation, 26 Nov 2026 — Lane F2)
+
+- **Save v3** (`SAVE_VERSION = 3`, `src/save.js`): mencakup SEMUA field
+  baru Wave-1/2 (discoveredSpots, 12 kunci inv baru + invQ + trees +
+  machineCooldown + soil/fert petak, npcFriendship/npcGiftedDay/npcChatDay/
+  npcMet/npcQuests/npcFestival, mpVisits/mpTrades/mpMinigameBest, season).
+  Save v2 lama tetap terbaca (migrasi malas v2→v3, progres utuh).
+  Server `validateSave()` menerima v2/v3, selalu menulis v3; field yang
+  tidak dikenal tetap dibuang. **Musim tersimpan, cuaca tidak**
+  (cuaca transien, selalu mulai cerah).
+- **Harga jual satu sumber**: `BASE_SELL` di `src/economy.js` — field
+  `sell` di `CROPS`/`ANIMAL_DEFS`/`PROCESSED`/`TREE_DEFS` dihapus.
+- **Pemulihan akun (kode pemulihan):** saat register, server menerbitkan
+  kode 12 karakter (`XXXX-XXXX-XXXX`, ~60 bit) dan menampilkannya SEKALI
+  di modal — pemain wajib mencatatnya. Server hanya menyimpan hash
+  SHA-256 kode (tabel `recovery_codes`). Pulih via "Lupa PIN?" di panel
+  auth (username + kode + PIN baru): kode single-use, PIN diganti, SEMUA
+  sesi lama dihapus, kode BARU diterbitkan (rotasi). Akun lama (pra-v3)
+  bisa menerbitkan kode pertama lewat tombol "Kode Pemulihan" saat login.
+  Rate limit 5 percobaan / 15 menit per username; pesan gagal generik.
+- **Perbaikan bug sync perangkat segar:** perangkat tanpa save lokal +
+  save server ada = server SELALU menang (sebelumnya save lokal kosong
+  menimpa server); PUT tidak boleh menyalip GET sinkronisasi awal.
+- **Smoke pasca-deploy backend** (selain §3): `GET /api/mp/leaderboard`
+  (Bearer) → 200; trade palsu (qty di atas save) → 400; visit 2× di hari
+  yang sama → kedua `{already:true, reward:0}`; register → kode pemulihan
+  → logout → recover dengan kode → login PIN baru → kode lama ditolak.
+  Detail + bukti: `~/workspace/lembah-hijau-game-lanes/cozy-2026-11-26/F2/LANE-F2-REPORT.md`.
+  Status deploy Wave-3: **TER-DEPLOY 26 Nov 2026** — migrasi 002+003 via
+  Management API (HTTP 201; 10 tabel di `public` terverifikasi), Edge
+  Function redeploy via CLI (`--no-verify-jwt`, `verify_jwt = false`
+  tetap), smoke live 11/11 (health, register+kode, leaderboard, trade
+  palsu 400, visit 2×, recovery end-to-end).
 
 ## 4. Kalau deploy gagal
 

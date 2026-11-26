@@ -141,6 +141,8 @@ export async function register(username, pin) {
   if (!validatePin(pin)) throw new Error('invalid_pin');
   const data = await fetchJson('/api/auth/register', { method: 'POST', body: { username: u, pin } });
   if (data.token) setSession(data);
+  // COZY-F2: register mengembalikan recoveryCode (sekali, plaintext) —
+  // client WAJIB menampilkannya ke pemain; tidak disimpan di mana pun.
   return data;
 }
 
@@ -151,6 +153,27 @@ export async function login(username, pin) {
   const data = await fetchJson('/api/auth/login', { method: 'POST', body: { username: u, pin } });
   if (data.token) setSession(data);
   return data;
+}
+
+// COZY-F2 — pemulihan akun: kode pemulihan (12 karakter, format
+// XXXX-XXXX-XXXX) + PIN baru. Sesi lama dihapus server; respons membawa
+// sesi baru + kode pemulihan BARU (rotasi) yang wajib ditampilkan lagi.
+export async function recover(username, code, pin) {
+  const u = normalizeUsername(username);
+  if (!validateUsername(u)) throw new Error('invalid_username');
+  if (!validatePin(pin)) throw new Error('invalid_pin');
+  const data = await fetchJson('/api/auth/recover', {
+    method: 'POST',
+    body: { username: u, code, pin },
+  });
+  if (data.token) setSession(data);
+  return data;
+}
+
+// COZY-F2 — terbitkan kode pemulihan baru untuk akun yang sudah login
+// (akun lama pra-v3 yang belum punya kode, atau kode hilang).
+export async function issueRecoveryCode() {
+  return fetchJson('/api/auth/recovery-code', { method: 'POST' });
 }
 
 export async function logout() {

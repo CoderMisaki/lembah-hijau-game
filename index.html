@@ -77,6 +77,8 @@
           <p id="auth-who"></p>
           <div class="row-btns">
             <button id="btn-logout" class="primary-btn secondary" data-i18n="logout">Keluar</button>
+            <!-- COZY-F2: terbitkan/tampilkan kode pemulihan (akun lama pra-v3 / kode hilang). -->
+            <button id="btn-show-recovery-code" class="primary-btn secondary" data-i18n="showRecoveryCode">Kode Pemulihan</button>
           </div>
         </div>
         <div id="auth-form">
@@ -92,8 +94,44 @@
           </label>
           <p id="auth-error" class="auth-error hidden" aria-live="polite"></p>
           <button id="btn-auth-submit" class="primary-btn" data-i18n="loginBtn">Masuk</button>
+          <button id="btn-forgot-pin" class="link-btn" data-i18n="forgotPin">Lupa PIN?</button>
           <button id="btn-offline" class="link-btn" data-i18n="offlineBtn">Main Offline (tanpa akun)</button>
           <p class="auth-hint" data-i18n="offlineNote">Offline: progress hanya tersimpan di perangkat ini sampai kamu login.</p>
+        </div>
+        <!-- COZY-F2: form pemulihan akun (kode pemulihan + PIN baru). -->
+        <div id="recovery-form" class="hidden">
+          <h3 data-i18n="recoveryTitle">Pulihkan Akun</h3>
+          <p class="auth-hint" data-i18n="recoveryHint">Masukkan username, kode pemulihan 12 karakter, lalu PIN baru.</p>
+          <label class="auth-label"><span data-i18n="username">Username</span>
+            <input id="recovery-username" type="text" autocomplete="username" maxlength="16" spellcheck="false" placeholder="izka123">
+          </label>
+          <label class="auth-label"><span data-i18n="recoveryCodeLabel">Kode pemulihan</span>
+            <input id="recovery-code" type="text" autocomplete="off" maxlength="14" spellcheck="false" placeholder="XXXX-XXXX-XXXX" class="recovery-code-input">
+          </label>
+          <label class="auth-label"><span data-i18n="newPin">PIN baru (6 digit)</span>
+            <input id="recovery-pin" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" pattern="[0-9]{6}" placeholder="••••••">
+          </label>
+          <label class="auth-label"><span data-i18n="pinConfirm">Konfirmasi PIN</span>
+            <input id="recovery-pin-confirm" type="password" inputmode="numeric" autocomplete="new-password" maxlength="6" pattern="[0-9]{6}" placeholder="••••••">
+          </label>
+          <p id="recovery-error" class="auth-error hidden" aria-live="polite"></p>
+          <button id="btn-recovery-submit" class="primary-btn" data-i18n="recoverBtn">Pulihkan Akun</button>
+          <button id="btn-recovery-back" class="link-btn" data-i18n="backToLogin">Kembali masuk</button>
+        </div>
+      </div>
+
+      <!-- COZY-F2: modal kode pemulihan — ditampilkan SEKALI sesudah register /
+           pulih / terbitkan ulang. Kode tidak disimpan di perangkat; pemain
+           wajib mencatatnya (salin / tulis) sebelum menutup modal. -->
+      <div id="recovery-code-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="recovery-code-title">
+        <div class="modal-box">
+          <h2 id="recovery-code-title" data-i18n="recoveryCodeTitle">Simpan Kode Pemulihanmu</h2>
+          <p class="auth-hint" data-i18n="recoveryCodeWarning">Ini satu-satunya jalan masuk bila PIN lupa. Kode ini TIDAK disimpan di perangkat ini — catat / salin sekarang, lalu simpan di tempat aman.</p>
+          <p id="recovery-code-value" class="recovery-code-value" aria-live="polite"></p>
+          <div class="row-btns">
+            <button id="btn-copy-recovery-code" class="primary-btn" data-i18n="copyCode">Salin Kode</button>
+            <button id="btn-recovery-code-close" class="primary-btn secondary" data-i18n="codeSavedClose">Sudah Kusimpan</button>
+          </div>
         </div>
       </div>
 

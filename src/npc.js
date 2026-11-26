@@ -200,6 +200,9 @@ export class NpcManager {
     const s = this.state;
     if (!s.npcFriendship || typeof s.npcFriendship !== 'object') s.npcFriendship = {};
     if (!s.npcGiftedDay || typeof s.npcGiftedDay !== 'object') s.npcGiftedDay = {};
+    // COZY-F2: hari terakhir tiap warga dapat +1 fp dari obrolan chat2
+    // (cap harian; lihat choose()).
+    if (!s.npcChatDay || typeof s.npcChatDay !== 'object') s.npcChatDay = {};
     if (!s.npcMet || typeof s.npcMet !== 'object') s.npcMet = {};
     if (!s.npcFestival || typeof s.npcFestival !== 'object') s.npcFestival = {};
     if (!s.npcQuests || !Array.isArray(s.npcQuests.daily)) s.npcQuests = freshQuests(s.day || 1);
@@ -299,6 +302,30 @@ export class NpcManager {
         npc.expr = 'neutral';
         setNpcFace(u.face, 'neutral');
       }
+      // COZY-F2 — hemat draw call: detail wajah (mata/alis/mulut/blush,
+      // ~15 mesh/NPC) tidak terlihat di atas ~30 m — sembunyikan, pulihkan
+      // di bawah ~26 m (histeresis anti-kedip). Dicek 2×/detik/NPC, bukan
+      // tiap frame. Di tampilan desa dekat (NPC 10–20 m) TIDAK ada yang
+      // disembunyikan — penghematan terasa saat NPC jauh / kamera desa.
+      npc._faceT = (npc._faceT || 0) + dt;
+      if (npc._faceT > 0.5) {
+        npc._faceT = 0;
+        const cam = this.game.camera;
+        if (cam && u.face) {
+          const cd = Math.hypot(cam.position.x - npc.x, cam.position.z - npc.z);
+          if (cd > 30 && !npc._faceHidden) {
+            npc._faceHidden = true;
+            if (u.face.eyes) u.face.eyes.visible = false;
+            for (const m of Object.values(u.face.mouths || {})) m.visible = false;
+            for (const b of u.face.brows || []) b.visible = false;
+          } else if (cd < 26 && npc._faceHidden) {
+            npc._faceHidden = false;
+            if (u.face.eyes) u.face.eyes.visible = true;
+            for (const b of u.face.brows || []) b.visible = true;
+            setNpcFace(u.face, npc.expr || 'neutral'); // pulihkan mulut yang benar
+          }
+        }
+      }
     }
   }
 
@@ -397,8 +424,16 @@ export class NpcManager {
     if (choice.next === 'festival') return this._festivalExchange(npc);
     const next = this._node(npc, choice.next);
     if (!next) { this.endTalk(); return { action: 'close' }; }
-    // Sampai node chat2 = obrolan akrab: +1 pertemanan.
-    if (choice.next === 'chat2') this.addFp(id, 1);
+    // Sampai node chat2 = obrolan akrab: +1 pertemanan, MAKSIMAL 1/hari/NPC
+    // (cap F2 — sebelumnya tiap kunjungan chat2 +1 tanpa batas, bisa
+    // di-farm klik berulang sampai Sahabat +50 koin; Lane D §5.2).
+    // npcChatDay dicatat per hari game; hari berganti = boleh +1 lagi.
+    if (choice.next === 'chat2') {
+      if ((this.state.npcChatDay[id] || 0) !== this.state.day) {
+        this.state.npcChatDay[id] = this.state.day;
+        this.addFp(id, 1);
+      }
+    }
     return { action: 'node', node: next };
   }
 

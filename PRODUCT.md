@@ -149,3 +149,24 @@ auth tetap jalan, 0 pageerror); screenshot 1440/768/390 + screenshot
 gameplay (map baru, karakter anime cowo + cewe, UI baru); anti-slop
 ban-list + taste inspect; impeccable detect --json; screenshot critique
 maks 3 round. JANGAN push/commit — parent yang melakukannya.
+
+## Cozy Life Simulation — Wave-3 Robustness (Lane F2, 26 Nov 2026)
+
+- **Save v3** (`SAVE_VERSION = 3`): semua field Wave-1/2 masuk save +
+  allowlist server; save v2 lama migrasi malas (progres utuh). Musim
+  tersimpan, cuaca tidak (transien).
+- **Pemulihan akun**: kode pemulihan 12 karakter sekali tampil saat
+  register (hash SHA-256 saja di server), single-use + rotasi, semua sesi
+  lama dihapus saat pulih. "Lupa PIN?" di panel auth.
+- **Harga jual satu sumber**: `BASE_SELL` di `src/economy.js`.
+- **Sync perangkat segar**: server selalu menang bila lokal kosong;
+  PUT menunggu sync awal selesai.
+- **Performa**: culling detail wajah NPC di atas 30 m; pemulihan kualitas
+  otomatis (naik 1 tingkat sesudah 30 dtk FPS ≥ 55, hanya bila penurunan
+  terakhir otomatis); dispose geometri preview kustomisasi.
+- **UI**: inv-bar mengalir di bawah hud-top (tidak lagi menumpuk tombol);
+  label aksi "Ngobrol"; titik warga sakura-pink di minimap; cap obrolan
+  +1 fp/hari/NPC; top-bar 390-landscape = strip scroll (tombol Warga
+  tercapai dengan scroll).
+- Detail + bukti verifikasi:
+  `~/workspace/lembah-hijau-game-lanes/cozy-2026-11-26/F2/LANE-F2-REPORT.md`.

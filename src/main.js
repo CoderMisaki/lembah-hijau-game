@@ -40,6 +40,8 @@ import {
   getSession, setSession, clearSession, hasPending, markPending, clearPending,
   validateUsername, validatePin, normalizeUsername,
   register as cloudRegister, login as cloudLogin, logout as cloudLogout,
+  // COZY-F2 — pemulihan akun (kode pemulihan).
+  recover as cloudRecover, issueRecoveryCode as cloudIssueRecoveryCode,
   cloudGetSave, cloudPutSave, cloudDeleteSave, cloudHealth,
   // COZY-E — start: API ekonomi multiplayer (server-validated).
   mpGarden, mpTradePropose, mpTradeAccept, mpTradeDecline, mpVisit,
@@ -87,6 +89,11 @@ function defaultState() {
            fertiliser: 0, appleSapling: 0, orangeSapling: 0, goldenEgg: 0 },
     plots, animals, playerX: 6, playerZ: 20, // spawn pembuka: selatan kebun/kandang,
     discoveredSpots: [], // id lokasi tersembunyi yang sudah memberi hadiah
+    // COZY-F2 — v3: musim tersimpan (mirror world.season; cuaca tetap
+    // runtime). npcChatDay = hari terakhir tiap warga dapat +1 fp dari
+    // obrolan chat2 (cap +1/hari/NPC, F2).
+    season: 'spring',
+    npcChatDay: {},
     // COZY-C — start: kualitas inventaris {item:{good,rare}} (inv = total),
     // pohon buah (4 titik), cooldown mesin pengolah (epoch ms, 0 = siap).
     invQ: {},
@@ -124,6 +131,9 @@ class Game {
         discoveredSpots: Array.isArray(saved.discoveredSpots)
           ? saved.discoveredSpots.filter((s) => typeof s === 'string')
           : [],
+        // COZY-F2 — v3: musim + cap obrolan harian (save v2 = default).
+        season: ['spring', 'summer', 'autumn', 'winter'].includes(saved.season) ? saved.season : 'spring',
+        npcChatDay: (saved.npcChatDay && typeof saved.npcChatDay === 'object') ? saved.npcChatDay : {},
         // COZY-C — start: pulihkan field ekonomi baru (absen di save lama =
         // default; sanitizeTrees/invQ memotong nilai liar).
         invQ: sanitizeInvQ(saved.invQ || {}, { ...this.state.inv, ...(saved.inv || {}) }),
@@ -156,6 +166,13 @@ class Game {
     this.offlineMode = false; // "Main Offline" eksplisit dari layar awal
     this._cloudBusy = false;
     this._cloudTimer = null;
+    // COZY-F2 — perbaikan bug sync perangkat segar (Lane E §7.1): janji +
+    // flag sinkronisasi boot pertama. Sampai janji ini selesai, TIDAK ADA
+    // PUT cloud yang boleh jalan (lihat cloudSync + scheduleCloudSync) —
+    // kalau tidak, save lokal kosong menimpa save server (PUT-vs-GET race).
+    this._bootSyncDone = false;
+    this._bootSyncPromise = null;
+    this._bootSyncFlush = false; // ada save() yang menunggu flush pasca-sync
     this._introUntil = 0;
     this._wasSwimming = false;
     this._waterLevel = -1;
@@ -194,6 +211,10 @@ class Game {
     this.camera.position.set(6, 16, 42);
 
     this.world = buildWorld(this.scene);
+    // COZY-F2 — v3: pulihkan musim tersimpan (bukan cuaca — cuaca selalu
+    // mulai cerah, lalu auto-cycle). buildWorld default spring; setSeason
+    // mewarnai ulang terrain/tajuk/rumput.
+    if (this.state.season && this.state.season !== 'spring') this.world.setSeason(this.state.season);
     // ---- Pasar malam (23 Nov 2026): zona + 8 game + wahana + jajanan.
     // Collider tiap modul digabung ke world.colliders (fisika + interaksi).
     this.nightmarket = buildNightMarketZone(this.scene, THREE, { lang: this.state.lang });
@@ -271,11 +292,16 @@ class Game {
       onLang: (lang) => this.setLang(lang),
       onGender: (g) => { this.state.gender = g; this.player.setGender(this.scene, g); this.save(); },
       onSound: (on) => { this.state.sound = on; this.sfx.enabled = on; this.save(); },
-      onQuality: (q) => this.applyQuality(q),
+      // COZY-F2: pilihan manual di pengaturan membatalkan pemulihan
+      // otomatis (kualitas manual tidak boleh dinaikkan sendiri).
+      onQuality: (q) => { this._autoDegraded = false; this.applyQuality(q); },
       onSave: () => this.saveNow(),
       onLoad: () => this.loadNow(),
       onCustomChange: (custom, gender) => this.applyCustom(custom, gender),
       onAuthSubmit: (mode, u, pin, pinConfirm) => this.handleAuth(mode, u, pin, pinConfirm),
+      // COZY-F2 — pemulihan akun (kode pemulihan).
+      onAuthRecover: (u, code, pin, pinConfirm) => this.handleRecover(u, code, pin, pinConfirm),
+      onShowRecoveryCode: () => this.handleShowRecoveryCode(),
       onOffline: () => this.enterOfflineMode(),
       onLogout: () => this.handleLogout(),
       onDeleteServerSave: () => this.deleteServerSave(),
@@ -442,9 +468,15 @@ class Game {
     this.ui.showStart(this._hadSave
       ? t('welcomeBack', this.state.lang, { d: this.state.day }) : '');
     this.ui.updateHUD(this.state);
-    this.applyQuality(this.state.quality);
+    // COZY-F2 — perbaikan bug sync perangkat segar (Lane E §7.1): JANGAN
+    // save() di sini. applyQuality() lama memanggil save() -> saveGame()
+    // men-stamp updatedAt = sekarang SEBELUM syncFromCloudOnBoot(), jadi di
+    // perangkat segar localAt selalu > remoteAt dan save lokal KOSONG
+    // diunggah menimpa save server. Sekarang: terapkan kualitas tanpa save,
+    // lalu sync dulu; save lokal pertama sesudah sync baru boleh naik.
+    this.applyQuality(this.state.quality, { save: false });
     // Sinkronisasi awal (non-blocking): bila ada sesi, samakan save lokal/server.
-    if (this.session) this.syncFromCloudOnBoot();
+    if (this.session) this._bootSyncPromise = this.syncFromCloudOnBoot();
     window.addEventListener('online', () => { if (hasPending() && this.session) this.cloudSync(); });
 
     window.addEventListener('resize', () => this.onResize());
@@ -537,7 +569,10 @@ class Game {
   }
 
   // ---------- Kualitas grafis + auto-degrade ----------
-  applyQuality(q) {
+  // COZY-F2: opts.save=false = terapkan kualitas TANPA save() — dipakai
+  // init() supaya boot tidak men-stamp updatedAt sebelum sync cloud
+  // pertama (bug Lane E §7.1). Semua pemanggil lain tetap save.
+  applyQuality(q, { save = true } = {}) {
     if (!QUALITY[q]) q = 'medium';
     this.state.quality = q;
     const cfg = QUALITY[q];
@@ -551,7 +586,7 @@ class Game {
     // Kualitas rendah mematikan partikel + goyangan rumput di world.
     this.world?.setQuality?.(q);
     this.scene?.traverse((o) => { if (o.material) o.material.needsUpdate = true; });
-    this.save();
+    if (save) this.save();
   }
   _fpsCheck(rawDt) {
     // Ukur dari waktu dinding nyata (bukan dt yang di-clamp untuk fisika).
@@ -562,16 +597,38 @@ class Game {
       const now = performance.now();
       if (this.fps < 45) {
         this._lowFpsTime += 1;
+        this._highFpsTime = 0;
         if (this._lowFpsTime >= 5 && now - this._lastDegrade > 10000) {
           const idx = QUALITY_ORDER.indexOf(this.state.quality);
           if (idx > 0) {
             this.applyQuality(QUALITY_ORDER[idx - 1]);
             this.ui.toast(t('qualityLowered', this.state.lang));
             this._lastDegrade = now;
+            this._autoDegraded = true; // naik lagi hanya bila turunnya otomatis
           }
           this._lowFpsTime = 0;
         }
-      } else this._lowFpsTime = 0;
+      } else {
+        this._lowFpsTime = 0;
+        // COZY-F2 — pemulihan kualitas: bila FPS tinggi bertahan 30 detik
+        // berturut-turut DAN penurunan terakhir otomatis (bukan pilihan
+        // manual pemain), naik SATU tingkat. Cooldown 30 dtk + syarat
+        // _autoDegraded mencegah osilasi naik-turun dan mencegah
+        // menimpa pilihan manual "Rendah" di pengaturan.
+        if (this.fps >= 55 && this._autoDegraded) {
+          this._highFpsTime = (this._highFpsTime || 0) + 1;
+          if (this._highFpsTime >= 30 && now - this._lastDegrade > 30000) {
+            const idx = QUALITY_ORDER.indexOf(this.state.quality);
+            if (idx >= 0 && idx < QUALITY_ORDER.length - 1) {
+              this.applyQuality(QUALITY_ORDER[idx + 1]);
+              this.ui.toast(t('qualityRaised', this.state.lang));
+              this._lastDegrade = now;
+            }
+            this._highFpsTime = 0;
+            this._autoDegraded = false; // naik manual-satu-langkah; tidak merangkak terus
+          }
+        } else this._highFpsTime = 0;
+      }
     }
   }
 
@@ -806,9 +863,12 @@ class Game {
     if (!ctx && nearCrate) ctx = { type: 'push', label: t('actionPush', this.state.lang) };
     // COZY-D — NPC + Sosial: warga terdekat (r 2,8 m) — dicek sesudah
     // petak/hewan/rumah/toko, sebelum pasar malam (zona jauh, tidak bentrok).
+    // COZY-F2: label dipendekkan jadi "Ngobrol" — "Ngobrol dengan Pak
+    // Darman" meluber keluar tombol aksi bundar di 390px (koordinator
+    // Wave-2); nama warga tetap terlihat di dialog yang terbuka.
     if (!ctx && this.npc) {
       const near = this.npc.nearestNpc(p.x, p.z, 2.8);
-      if (near) ctx = { type: 'npc', id: near.def.id, label: t('actionTalk', this.state.lang, { name: near.def.name }) };
+      if (near) ctx = { type: 'npc', id: near.def.id, label: t('npcTalk', this.state.lang) };
     }
     // Pasar malam: game berhadiah (r 3,2), jajanan (r 2,8), wahana (r board).
     // Dicek setelah ctx lama supaya petak/kandang/toko/dll tetap prioritas.
@@ -975,9 +1035,24 @@ class Game {
     // tanpa field ini = tetap kosong; NpcManager mengisi default bila null).
     if (d.npcFriendship && typeof d.npcFriendship === 'object') this.state.npcFriendship = d.npcFriendship;
     if (d.npcGiftedDay && typeof d.npcGiftedDay === 'object') this.state.npcGiftedDay = d.npcGiftedDay;
+    if (d.npcChatDay && typeof d.npcChatDay === 'object') this.state.npcChatDay = d.npcChatDay;
     if (d.npcMet && typeof d.npcMet === 'object') this.state.npcMet = d.npcMet;
     if (d.npcQuests && Array.isArray(d.npcQuests.daily)) this.state.npcQuests = d.npcQuests;
     if (d.npcFestival && typeof d.npcFestival === 'object') this.state.npcFestival = d.npcFestival;
+    // COZY-F2 — v3: pulihkan musim + field yang dulu TIDAK PERNAH
+    // dipulihkan dari cloud (discoveredSpots, mp*). Guard "hadir di
+    // payload" penting: save server lama (pra-v3) tidak membawa field ini
+    // — tanpa guard, load cloud akan MENGHAPUS progres lokal.
+    if (['spring', 'summer', 'autumn', 'winter'].includes(d.season)) {
+      this.state.season = d.season;
+      this.world?.setSeason?.(d.season);
+    }
+    if (Array.isArray(d.discoveredSpots)) {
+      this.state.discoveredSpots = d.discoveredSpots.filter((s) => typeof s === 'string');
+    }
+    if (d.mpVisits && typeof d.mpVisits === 'object' && !Array.isArray(d.mpVisits)) this.state.mpVisits = d.mpVisits;
+    if (Array.isArray(d.mpTrades)) this.state.mpTrades = d.mpTrades.slice(0, 20);
+    if (Number.isInteger(d.mpMinigameBest) && d.mpMinigameBest >= 0) this.state.mpMinigameBest = d.mpMinigameBest;
     this.npc?._ensureState();
     if (Array.isArray(d.plots) && d.plots.length === this.state.plots.length) {
       this.state.plots.splice(0, this.state.plots.length, ...d.plots);
@@ -998,37 +1073,82 @@ class Game {
     return true;
   }
 
+  // COZY-F2 — perbaikan bug sync perangkat segar (Lane E §7.1).
+  // DUA lapis pertahanan:
+  //   (1) Perangkat segar (TANPA save lokal) + save server ADA = server
+  //       SELALU menang, tanpa membandingkan updatedAt. Alasannya:
+  //       save lokal segar hanyalah default (koin 50, hari 1) — tidak ada
+  //       progres yang perlu dilindungi; membandingkan timestamp di sini
+  //       salah karena init() lama men-stamp localAt = waktu boot (selalu
+  //       > remoteAt) dan cabang localAt > remoteAt mengunggah kekosongan.
+  //   (2) PUT-vs-GET race: cloudSync() MENUNGGU janji sync boot selesai
+  //       (maks 10 dtk) sebelum PUT apa pun; scheduleCloudSync() menunda
+  //       timer sampai sync boot selesai. Jadi tidak ada PUT yang bisa
+  //       menyalip GET sinkronisasi awal — baik dari autosave 10 dtk,
+  //       debounce 1,5 dtk, maupun klik Simpan/Mulai.
+  // Jalur normal TIDAK berubah: save lokal ada + server lebih baru =
+  // server menang; lokal lebih baru = upload; tidak ada save server +
+  // ada save lokal = upload; offline = pending seperti biasa.
   async syncFromCloudOnBoot() {
     try {
       const res = await cloudGetSave();
       if (!res || !res.save) {
         // Akun baru / belum ada save server: unggah save lokal bila ada progress.
-        if (this._hadSave) await this.cloudSync();
+        if (this._hadSave) await this._cloudPutNow();
         return;
       }
       const remoteAt = res.save.updatedAt || res.save.savedAt || res.updatedAt || 0;
       const localAt = this.state.updatedAt || 0;
-      if (remoteAt > localAt) {
+      if (!this._hadSave || remoteAt > localAt) {
         this.applySaveData(res.save);
         this.ui.toast(t('serverNewer', this.state.lang));
       } else if (localAt > remoteAt) {
-        await this.cloudSync();
+        // PUT langsung (bukan cloudSync): sync boot sedang BERJALAN di
+        // sini, jadi menunggu janji-nya sendiri = deadlock 10 dtk.
+        await this._cloudPutNow();
         this.ui.toast(t('localUploaded', this.state.lang));
       }
       // Sama -> server menang, tapi isinya identik jadi tidak ada yang diubah.
     } catch (e) {
       // Offline / server belum deploy: lanjut dengan save lokal, tandai pending.
       markPending();
+    } finally {
+      this._bootSyncDone = true;
+      if (this._bootSyncFlush) {
+        this._bootSyncFlush = false;
+        this.scheduleCloudSync();
+      }
     }
   }
 
   scheduleCloudSync() {
     if (!this.session) return;
+    // COZY-F2: jangan jadwalkan PUT sebelum sync boot selesai — timer
+    // ditunda ke finally syncFromCloudOnBoot (lihat _bootSyncFlush).
+    if (this.session && !this._bootSyncDone) { this._bootSyncFlush = true; return; }
     clearTimeout(this._cloudTimer);
     this._cloudTimer = setTimeout(() => this.cloudSync(), 1500);
   }
 
   async cloudSync() {
+    if (!this.session) return false;
+    // COZY-F2: tunggu sinkronisasi boot selesai dulu (maks 10 dtk) —
+    // PUT tidak boleh menyalip GET awal. Bila tidak ada sesi boot sync
+    // (mis. login sesudah boot), janji null dan tidak ada yang ditunggu.
+    if (this._bootSyncPromise) {
+      try {
+        await Promise.race([
+          this._bootSyncPromise,
+          new Promise((r) => setTimeout(r, 10000)),
+        ]);
+      } catch (e) { /* sync boot gagal -> lanjut; PUT akan ditandai pending bila gagal */ }
+    }
+    return this._cloudPutNow();
+  }
+
+  // PUT save ke server (tanpa menunggu sync boot — dipakai cloudSync()
+  // sesudah menunggu, dan syncFromCloudOnBoot() yang sedang berjalan).
+  async _cloudPutNow() {
     if (!this.session) return false;
     // Bila ada sync yang sedang berjalan, TUNGGU selesai lalu sync ulang —
     // jangan langsung gagal (klik Simpan 2x cepat tidak boleh lapor "offline").
@@ -1101,6 +1221,10 @@ class Game {
       this.ui.toast(t('saveCleared', this.state.lang));
       setTimeout(() => location.reload(), 900);
     };
+    // COZY-F2: batalkan PUT terjadwal — tanpanya PUT save lama bisa jalan
+    // SESUDAH cloudDeleteSave() dan menghidupkan kembali save server
+    // yang baru saja dihapus (balapan hapus-vs-unggah).
+    clearTimeout(this._cloudTimer);
     clearSave();
     clearPending();
     if (this.session) {
@@ -1145,8 +1269,16 @@ class Game {
       this.offlineMode = false;
       this.ui.setAuthState(u);
       this.ui.toast(t(mode === 'register' ? 'registerOk' : 'loginOk', lang, { u }));
-      // Samakan save lokal/server untuk akun ini.
-      await this.syncFromCloudOnBoot();
+      // COZY-F2: register mengembalikan kode pemulihan — tampilkan SEKALI
+      // (modal). Tanpa ini pemain baru tidak pernah tahu kodenya.
+      if (mode === 'register' && res && res.recoveryCode) this.ui.showRecoveryCode(res.recoveryCode);
+      // Samakan save lokal/server untuk akun ini. Simpan janjinya di
+      // _bootSyncPromise + reset flag-nya supaya save() yang terjadi
+      // selama login (mis. klik Mulai) menunggu sync ini selesai dulu
+      // (PUT-vs-GET race yang sama seperti boot; lihat cloudSync()).
+      this._bootSyncDone = false;
+      this._bootSyncPromise = this.syncFromCloudOnBoot();
+      await this._bootSyncPromise;
       this.save();
     } catch (e) {
       const status = e && e.status;
@@ -1161,8 +1293,65 @@ class Game {
     }
   }
 
+  // COZY-F2 — pemulihan akun: kode pemulihan + PIN baru.
+  // Sukses = login otomatis dengan PIN baru (sesi baru dari server) +
+  // kode pemulihan BARU ditampilkan sekali (rotasi — kode lama hangus).
+  // Gagal = pesan generik server (tidak membedakan user/kode salah).
+  async handleRecover(username, code, pin, pinConfirm) {
+    const lang = this.state.lang;
+    this.ui.setRecoveryError('');
+    const u = normalizeUsername(username);
+    if (!validateUsername(u)) { this.ui.setRecoveryError(t('invalidUsername', lang)); return; }
+    if (!validatePin(pin)) { this.ui.setRecoveryError(t('invalidPin', lang)); return; }
+    if (pin !== pinConfirm) { this.ui.setRecoveryError(t('pinMismatch', lang)); return; }
+    this.ui.setRecoveryBusy(true);
+    try {
+      const res = await cloudRecover(u, code, pin);
+      this.session = getSession() || res;
+      if (res && res.token) setSession(res);
+      this.state.username = u;
+      this.offlineMode = false;
+      this.ui.setAuthState(u);
+      this.ui.showRecoveryForm(false);
+      this.ui.toast(t('recoveryOk', lang, { u }));
+      if (res && res.recoveryCode) this.ui.showRecoveryCode(res.recoveryCode);
+      // Samakan save seperti login (janji disimpan supaya save selama
+      // sync menunggu — lihat handleAuth).
+      this._bootSyncDone = false;
+      this._bootSyncPromise = this.syncFromCloudOnBoot();
+      await this._bootSyncPromise;
+      this.save();
+    } catch (e) {
+      const status = e && e.status;
+      if (status === 429) this.ui.setRecoveryError(t('lockedOut', lang));
+      else if (status === 401) this.ui.setRecoveryError(t('recoveryFailed', lang));
+      else this.ui.setRecoveryError((e && e.message) || t('recoveryFailed', lang));
+    } finally {
+      this.ui.setRecoveryBusy(false);
+    }
+  }
+
+  // COZY-F2 — terbitkan kode pemulihan baru saat sudah login (akun lama
+  // pra-v3 yang belum punya kode, atau kode hilang). Kode lama langsung
+  // hangus begitu kode baru diterbitkan.
+  async handleShowRecoveryCode() {
+    if (!this.session) { this.ui.toast(t('needLogin', this.state.lang)); return; }
+    try {
+      const res = await cloudIssueRecoveryCode();
+      if (res && res.recoveryCode) this.ui.showRecoveryCode(res.recoveryCode);
+      else this.ui.toast(t('loadFailed', this.state.lang));
+    } catch (e) {
+      this.ui.toast(t('loadFailed', this.state.lang));
+    }
+  }
+
   async handleLogout() {
     this.save();
+    // COZY-F2: batalkan PUT cloud yang dijadwalkan save() di atas — sesudah
+    // logout token sesi dicabut server; PUT yang telanjur jalan akan 401
+    // (dan menandai pending tanpa guna). Urutan penting: clearTimeout
+    // SESUDAH save(), karena save() sendiri menjadwalkan PUT baru.
+    clearTimeout(this._cloudTimer);
     try { await cloudLogout(); } catch (e) { /* abaikan */ }
     clearSession();
     this.session = null;
@@ -1684,6 +1873,9 @@ class Game {
   save() {
     this.state.playerX = this.player.x;
     this.state.playerZ = this.player.z;
+    // COZY-F2 — v3: salin musim dunia ke state sebelum disimpan (musim
+    // hanya berubah lewat world.setSeason; state.season = cerminnya).
+    if (this.world && typeof this.world.season === 'string') this.state.season = this.world.season;
     saveGame(this.state);
     this.scheduleCloudSync();
   }

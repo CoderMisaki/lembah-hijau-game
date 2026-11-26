@@ -1,15 +1,14 @@
 // economy.js — COZY-C: satu-satunya sumber harga untuk ekonomi baru.
-// Semua harga jual baru (tanaman, buah, olahan) + permintaan pasar harian
-// + resep olah + kualitas panen mengalir dari sini. Harga dasar tanaman
-// dibaca dari CROPS / ANIMAL_DEFS (bukan disalin) supaya tidak ada tabel
-// kedua; harga olahan + bibit pohon + pupuk didefinisikan di sini.
+// F2 (save v3): SEMUA harga jual tinggal di BASE_SELL di bawah — field
+// `sell` di CROPS / ANIMAL_DEFS / PROCESSED / TREE_DEFS DIHAPUS supaya tidak
+// ada tabel kedua yang bisa drift. Harga dasar tanaman dibaca dari sini,
+// bukan dari tabel asalnya. Harga beli benih tetap di CROPS (`seed`).
 // Permintaan harian = fungsi murni dari nomor hari + seed tetap —
 // deterministik, jadi bisa dihitung ulang server-side nanti (F2/E lane),
 // bukan dipilih client.
 // Kualitas panen (normal/bagus/langka) di-roll client saat panen;
 // server kelak hanya bisa memvalidasi rentang jumlah (lihat laporan lane C).
 import { CROPS } from './farm.js';
-import { ANIMAL_DEFS } from './animals.js';
 
 export const ECONOMY_SEED = 20261126;
 
@@ -37,9 +36,9 @@ export function qualityMult(q) { return (QUALITY[q] || QUALITY.normal).mult; }
 
 // ---- Barang olahan (hasil mesin pengolah) ----
 export const PROCESSED = {
-  cheese: { id: 'cheese', name: 'Keju', nameEn: 'Cheese', icon: 'milk', sell: 45 },
-  sauce: { id: 'sauce', name: 'Saus Tomat', nameEn: 'Tomato Sauce', icon: 'tomato', sell: 55 },
-  flour: { id: 'flour', name: 'Tepung', nameEn: 'Flour', icon: 'wheat', sell: 40 },
+  cheese: { id: 'cheese', name: 'Keju', nameEn: 'Cheese', icon: 'milk' },
+  sauce: { id: 'sauce', name: 'Saus Tomat', nameEn: 'Tomato Sauce', icon: 'tomato' },
+  flour: { id: 'flour', name: 'Tepung', nameEn: 'Flour', icon: 'wheat' },
 };
 
 // ---- Resep mesin pengolah (satu mesin: Pengolah / mill-kitchen) ----
@@ -75,8 +74,8 @@ export const TREE_SPOTS = [
   { x: 48, z: 58 },
 ];
 export const TREE_DEFS = {
-  apple: { id: 'apple', name: 'Apel', nameEn: 'Apple', icon: 'tomato', sell: 18, color: 0xd9382b, fruitColor: 0xd9382b, leafColor: 0x2e7d32 },
-  orange: { id: 'orange', name: 'Jeruk', nameEn: 'Orange', icon: 'pumpkin', sell: 22, color: 0xe87a2a, fruitColor: 0xe87a2a, leafColor: 0x2e7d32 },
+  apple: { id: 'apple', name: 'Apel', nameEn: 'Apple', icon: 'tomato', color: 0xd9382b, fruitColor: 0xd9382b, leafColor: 0x2e7d32 },
+  orange: { id: 'orange', name: 'Jeruk', nameEn: 'Orange', icon: 'pumpkin', color: 0xe87a2a, fruitColor: 0xe87a2a, leafColor: 0x2e7d32 },
 };
 export const TREE_MATURE_DAYS = 2; // bibit -> pohon berbuah dalam 2 hari
 export const TREE_FRUIT_MAX = 3; // buah maks per pohon; +1/hari bila sudah dewasa
@@ -151,14 +150,19 @@ export function itemIcon(itemId) {
 }
 
 // ---- Harga dasar (single source) ----
-// Tanaman + telur/susu dibaca dari tabel asalnya; pohon + olahan dari sini.
+// F2: SATU-SATUNYA tabel harga jual. Nilai-nilai ini dulu tersebar di
+// CROPS[].sell + ANIMAL_DEFS[].sell + PROCESSED[].sell + TREE_DEFS[].sell
+// (dan peta hardcoded di main.js sellAll lama) — semua dipindah ke sini.
+// Mengubah harga = ubah SATU tempat ini saja; basePrice() satu-satunya
+// pembaca. Harga beli benih/pupuk/bibit BUKAN di sini (seed di CROPS,
+// FERTILISER/SAPLINGS di atas).
+export const BASE_SELL = {
+  carrot: 12, tomato: 20, pumpkin: 32, wheat: 14, strawberry: 30,
+  apple: 18, orange: 22, egg: 8, milk: 15,
+  cheese: 45, sauce: 55, flour: 40,
+};
 export function basePrice(itemId) {
-  if (CROPS[itemId]) return CROPS[itemId].sell;
-  if (TREE_DEFS[itemId]) return TREE_DEFS[itemId].sell;
-  if (PROCESSED[itemId]) return PROCESSED[itemId].sell;
-  if (itemId === 'egg') return ANIMAL_DEFS.ayam.sell;
-  if (itemId === 'milk') return ANIMAL_DEFS.sapi.sell;
-  return 0;
+  return BASE_SELL[itemId] || 0;
 }
 export const SELLABLES = [
   'carrot', 'tomato', 'pumpkin', 'wheat', 'strawberry',

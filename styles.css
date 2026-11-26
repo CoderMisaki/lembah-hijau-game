@@ -181,9 +181,13 @@ h1, h2 {
 }
 .hud-btn:hover { background: var(--lh-paper); }
 .hud-btn:active { transform: scale(.93); }
+/* COZY-F2: bar inventaris mengalir DI BAWAH #hud-top (bukan absolute di
+   atasnya) — sebelumnya top:10px menumpuk chip tepat di baris tombol
+   Simpan/Muat/... di 1440px, makin parah dengan 17 item. Di layar kecil
+   (<=700px) tetap absolute di bawah (lihat media query). */
 #inv-bar {
-  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
   display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 46vw;
+  width: fit-content; margin: 2px auto 0; pointer-events: none;
 }
 .inv-chip {
   background: var(--lh-paper-2);
@@ -284,7 +288,11 @@ h1, h2 {
 .round-btn.active { background: var(--lh-sun); }
 .round-btn.action {
   width: 76px; height: 76px; background: var(--lh-sun);
-  font-size: 15px; font-weight: 800; min-height: 76px; color: var(--lh-ink);
+  font-size: 14px; font-weight: 800; min-height: 76px; color: var(--lh-ink);
+  /* COZY-F2: pengaman label — "Ngobrol dengan Pak Darman" dulu meluber
+     keluar tombol bundar; label kini "Ngobrol", tapi bungkus + pusatkan
+     tetap dijaga supaya label aksi apa pun tidak meluber. */
+  line-height: 1.1; overflow-wrap: break-word; text-align: center; padding: 6px;
 }
 .round-btn:active { transform: scale(.93); }
 
@@ -511,6 +519,21 @@ h1, h2 {
 .auth-hint { font-size: 12px; color: var(--lh-muted); margin: 0 0 10px; text-align: center; }
 .auth-error { color: var(--lh-danger); font-weight: 700; font-size: 14px; margin: 6px 0 10px; text-align: center; }
 #btn-auth-submit { width: 100%; margin-bottom: var(--lh-s2); }
+#btn-recovery-submit { width: 100%; margin-bottom: var(--lh-s2); }
+#recovery-form h3 { text-align: center; margin: 0 0 var(--lh-s2); }
+/* COZY-F2 — kode pemulihan: monospace karena ini kode/data (bukan kostum);
+   ukuran besar + spasi huruf lebar supaya mudah dibaca ulang saat dicatat. */
+.recovery-code-value {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 22px; font-weight: 700; letter-spacing: 0.12em; text-align: center;
+  background: var(--lh-paper-2); color: var(--lh-ink);
+  border: 3px solid var(--lh-ink); border-radius: var(--lh-r-btn);
+  padding: 14px 10px; margin: 6px 0 16px; user-select: all;
+}
+.recovery-code-input {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
 .link-btn {
   background: none; border: none; color: var(--lh-pine); font-weight: 700; font-size: 14px;
   text-decoration: underline; text-underline-offset: 3px; min-height: 44px; width: 100%;
@@ -564,7 +587,7 @@ h1, h2 {
 @media (max-width: 700px) {
   #minimap { top: 68px; right: 8px; }
   #minimap-canvas { width: 104px; height: 104px; }
-  #inv-bar { max-width: 52vw; top: auto; bottom: 170px; left: 50%; }
+  #inv-bar { position: absolute; top: auto; bottom: 170px; left: 50%; transform: translateX(-50%); max-width: 52vw; margin: 0; }
   #hint-bar { bottom: 158px; }
   #joystick { width: 112px; height: 112px; }
   .round-btn { width: 56px; height: 56px; }

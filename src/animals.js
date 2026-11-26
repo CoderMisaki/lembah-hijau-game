@@ -1,14 +1,15 @@
 // animals.js — ayam + sapi di kandang berpagar.
 // Beri makan (2 koin/ekor/hari, via pakan atau potong koin langsung);
-// yang diberi makan menghasilkan keesokan paginya: Ayam -> Telur (jual 8),
-// Sapi -> Susu (jual 15). Hewan berkeliaran di kandang + hindari pagar.
+// yang diberi makan menghasilkan keesokan paginya: Ayam -> Telur,
+// Sapi -> Susu. Harga jual telur/susu tinggal di BASE_SELL economy.js
+// (F2: field `sell` dihapus — satu sumber harga).
 import * as THREE from 'three';
 import { terrainHeight, clamp } from './physics.js';
 import { PEN, toonMat, addOutline } from './world.js';
 
 export const ANIMAL_DEFS = {
-  ayam: { name: 'Ayam', icon: 'chicken', produce: 'egg', produceName: 'Telur', sell: 8, count: 3 },
-  sapi: { name: 'Sapi', icon: 'cow', produce: 'milk', produceName: 'Susu', sell: 15, count: 2 },
+  ayam: { name: 'Ayam', icon: 'chicken', produce: 'egg', produceName: 'Telur', count: 3 },
+  sapi: { name: 'Sapi', icon: 'cow', produce: 'milk', produceName: 'Susu', count: 2 },
 };
 
 function mat(color, opts = {}) { return toonMat(color, opts); }

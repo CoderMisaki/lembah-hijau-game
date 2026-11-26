@@ -14,12 +14,14 @@ import {
 } from './economy.js';
 
 export const CROPS = {
-  carrot:  { id: 'carrot',  name: 'Wortel', icon: 'carrot', days: 2, seed: 4,  sell: 12, color: 0xe87a2a, seedKey: 'carrotSeed' },
-  tomato:  { id: 'tomato',  name: 'Tomat',  icon: 'tomato', days: 3, seed: 8,  sell: 20, color: 0xd9382b, seedKey: 'tomatoSeed' },
-  pumpkin: { id: 'pumpkin', name: 'Labu',   icon: 'pumpkin', days: 4, seed: 14, sell: 32, color: 0xe8912a, seedKey: 'pumpkinSeed' },
+  carrot:  { id: 'carrot',  name: 'Wortel', icon: 'carrot', days: 2, seed: 4,  color: 0xe87a2a, seedKey: 'carrotSeed' },
+  tomato:  { id: 'tomato',  name: 'Tomat',  icon: 'tomato', days: 3, seed: 8,  color: 0xd9382b, seedKey: 'tomatoSeed' },
+  pumpkin: { id: 'pumpkin', name: 'Labu',   icon: 'pumpkin', days: 4, seed: 14, color: 0xe8912a, seedKey: 'pumpkinSeed' },
   // COZY-C: Gandum (bahan tepung) + Stroberi (tanaman ke-5).
-  wheat:      { id: 'wheat',      name: 'Gandum',    icon: 'wheat',    days: 3, seed: 6,  sell: 14, color: 0xd9b64a, seedKey: 'wheatSeed' },
-  strawberry: { id: 'strawberry', name: 'Stroberi',  icon: 'tomato',   days: 4, seed: 12, sell: 30, color: 0xe84a6f, seedKey: 'strawberrySeed' },
+  // Harga JUAL tidak di sini — satu-satunya sumber harga jual adalah
+  // BASE_SELL di economy.js (F2: field `sell` dihapus supaya tak drift).
+  wheat:      { id: 'wheat',      name: 'Gandum',    icon: 'wheat',    days: 3, seed: 6,  color: 0xd9b64a, seedKey: 'wheatSeed' },
+  strawberry: { id: 'strawberry', name: 'Stroberi',  icon: 'tomato',   days: 4, seed: 12, color: 0xe84a6f, seedKey: 'strawberrySeed' },
 };
 
 export function plotPos(ix, iz) {

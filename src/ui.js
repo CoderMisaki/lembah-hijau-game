@@ -127,6 +127,14 @@ export class UI {
     $('auth-pin-confirm').addEventListener('keydown', (e) => { if (e.key === 'Enter') this._submitAuth(); });
     $('btn-offline').addEventListener('click', () => this.h.onOffline());
     $('btn-logout').addEventListener('click', () => this.h.onLogout());
+    // COZY-F2 — pemulihan akun (kode pemulihan).
+    $('btn-forgot-pin').addEventListener('click', () => this.showRecoveryForm(true));
+    $('btn-recovery-back').addEventListener('click', () => this.showRecoveryForm(false));
+    $('btn-recovery-submit').addEventListener('click', () => this._submitRecovery());
+    $('recovery-pin-confirm').addEventListener('keydown', (e) => { if (e.key === 'Enter') this._submitRecovery(); });
+    $('btn-show-recovery-code').addEventListener('click', () => this.h.onShowRecoveryCode());
+    $('btn-copy-recovery-code').addEventListener('click', () => this._copyRecoveryCode());
+    $('btn-recovery-code-close').addEventListener('click', () => this.hideRecoveryCode());
     // ---- Minimap realtime ----
     $('btn-minimap-toggle').addEventListener('click', (e) => { e.stopPropagation(); this._toggleMinimap(); });
     window.addEventListener('resize', () => { if (!this._mmCollapsed) this._drawMinimap(true); });
@@ -736,6 +744,28 @@ export class UI {
       ctx.stroke();
       ctx.restore();
     }
+    // COZY-F2 — titik warga (opsional, zero-risk): titik sakura-pink per
+    // NPC yang sedang terlihat (pedagang keliling hanya di jam dagang —
+    // group.visible false di luar jam, jadi tidak digambar). Baca langsung
+    // dari window.__LH_GAME (pola yang sama dengan _resolveMinimap);
+    // semua guard defensif — gagal baca = minimap tetap jalan tanpa titik.
+    try {
+      const g = typeof window !== 'undefined' ? window.__LH_GAME : null;
+      const npcs = g && g.npc && Array.isArray(g.npc.npcs) ? g.npc.npcs : null;
+      if (npcs) {
+        for (const npc of npcs) {
+          if (!npc || !npc.group || !npc.group.visible) continue;
+          if (typeof npc.x !== 'number' || typeof npc.z !== 'number') continue;
+          ctx.fillStyle = '#ff8fb3'; // sakura — warga desa
+          ctx.strokeStyle = '#1d2b53';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(X(npc.x), Z(npc.z), 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+    } catch (e) { /* minimap tetap jalan tanpa titik warga */ }
     // Titik pemain lain (NIGHT MARKET M): lingkaran emas --lh-sun — bentuknya
     // beda dari segitiga diri sendiri (yang sejak awal sudah emas; jangan
     // diubah, verify-bigmap mengunci piksel emas di posisi pemain). Nama
@@ -1409,7 +1439,59 @@ export class UI {
     $('auth-pin-confirm-wrap').classList.toggle('hidden', mode !== 'register');
     $('btn-auth-submit').textContent = mode === 'login' ? t('loginBtn', this.lang) : t('registerBtn', this.lang);
     $('auth-pin').setAttribute('autocomplete', mode === 'login' ? 'current-password' : 'new-password');
+    // COZY-F2: "Lupa PIN?" hanya relevan di mode Masuk; ganti mode
+    // menutup form pemulihan supaya tidak tertinggal terbuka.
+    $('btn-forgot-pin').classList.toggle('hidden', mode !== 'login');
+    this.showRecoveryForm(false);
     this.setAuthError('');
+  }
+  // COZY-F2 — form pemulihan akun (ganti tampilan form login <-> pulih).
+  showRecoveryForm(show) {
+    $('recovery-form').classList.toggle('hidden', !show);
+    $('auth-form').classList.toggle('hidden', show);
+    $('btn-forgot-pin').classList.toggle('hidden', show);
+    if (show) {
+      this.setRecoveryError('');
+      $('recovery-username').value = $('auth-username').value;
+    }
+  }
+  setRecoveryError(msg) {
+    const e = $('recovery-error');
+    e.textContent = msg || '';
+    e.classList.toggle('hidden', !msg);
+  }
+  setRecoveryBusy(busy) {
+    $('btn-recovery-submit').disabled = busy;
+    $('btn-recovery-submit').textContent = busy ? '…' : t('recoverBtn', this.lang);
+  }
+  _submitRecovery() {
+    this.h.onAuthRecover(
+      $('recovery-username').value,
+      $('recovery-code').value,
+      $('recovery-pin').value,
+      $('recovery-pin-confirm').value,
+    );
+  }
+  // COZY-F2 — modal kode pemulihan (sekali tampil; kode TIDAK disimpan).
+  showRecoveryCode(code) {
+    $('recovery-code-value').textContent = code || '';
+    $('btn-copy-recovery-code').textContent = t('copyCode', this.lang);
+    $('recovery-code-modal').classList.remove('hidden');
+  }
+  hideRecoveryCode() {
+    $('recovery-code-modal').classList.add('hidden');
+    $('recovery-code-value').textContent = ''; // jangan biarkan kode tertinggal di DOM
+  }
+  async _copyRecoveryCode() {
+    const code = $('recovery-code-value').textContent || '';
+    try {
+      await navigator.clipboard.writeText(code);
+      $('btn-copy-recovery-code').textContent = t('copied', this.lang);
+    } catch (e) {
+      // Clipboard ditolak (izin / konteks tidak aman): pemain masih bisa
+      // menyalin manual — teks kode tetap terlihat di modal.
+      $('btn-copy-recovery-code').textContent = t('copyFailed', this.lang);
+    }
   }
   setAuthError(msg) {
     const e = $('auth-error');
@@ -1550,7 +1632,17 @@ export class UI {
   _rebuildPreview() {
     const p = this._preview;
     if (!p) return;
-    if (p.group) { p.scene.remove(p.group); p.group = null; }
+    // COZY-F2 — buang geometri grup lama sebelum diganti (bocor GPU kecil
+    // tiap klik kustomisasi: geometri karakter tidak pernah di-dispose).
+    // Material TIDAK di-dispose — material dipakai bersama (toonMat cache /
+    // material outline bersama di player.js).
+    if (p.group) {
+      p.scene.remove(p.group);
+      p.group.traverse((o) => {
+        if (o.geometry) o.geometry.dispose();
+      });
+      p.group = null;
+    }
     p.group = buildCharacter(this._customGender, this._custom);
     p.group.position.y = 0;
     p.scene.add(p.group);

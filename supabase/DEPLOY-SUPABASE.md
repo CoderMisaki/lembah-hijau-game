@@ -142,6 +142,42 @@ Bila health gagal, lihat "Kalau gagal" di bawah SEBELUM lanjut.
 3. Backend Workers + D1 lama tetap utuh di `worker/` — deploy ulang
    mengikuti `DEPLOY.md` bila mau kembali ke Cloudflare.
 
+## 9. Wave-3 (F2, 26 Nov 2026) — migrasi 002 + 003 & redeploy fungsi
+
+Urutan deploy (jangan dibalik):
+
+1. **Migrasi 002** (ekonomi multiplayer): paste SELURUH isi
+   `supabase/migrations/002_lembah_hijau_multiplayer.sql` di SQL Editor,
+   Run. Menambah `trade_offers`, `trade_ledger`, `visit_ledger`,
+   `minigame_scores`.
+2. **Migrasi 003** (kode pemulihan): paste SELURUH isi
+   `supabase/migrations/003_lembah_hijau_recovery.sql`, Run. Menambah
+   `recovery_codes` (username PK, code_hash SHA-256, created_at).
+   Verifikasi: Table Editor harus menunjukkan 10 tabel di `public`.
+3. **Redeploy Edge Function** (kode sudah termasuk save v3 + endpoint
+   recovery; `verify_jwt` TETAP false):
+   ```bash
+   cd ~/workspace/lembah-hijau-game
+   ~/workspace/tools/supabase-cli/supabase functions deploy lembah-hijau-api \
+     --project-ref ajsliyqjucgdtbimvdtd --no-verify-jwt
+   ```
+   Token CLI di `~/.config/supabase-lembah-hijau/access-token`
+   (kedaluwarsa 28 Nov 2026 — sesudah itu `supabase login` ulang).
+   Alternatif tanpa CLI: paste `index.ts` di editor fungsi dashboard
+   (langkah 2) — pastikan toggle Verify JWT tetap OFF.
+   Migrasi 002/003 juga bisa dijalankan via Management API (tanpa
+   dashboard): `POST https://api.supabase.com/v1/projects/ajsliyqjucgdtbimvdtd/database/query`
+   dengan Bearer access-token dan body `{"query": "<isi file .sql>"}`.
+4. **Smoke** (selain langkah 4): `GET /api/mp/leaderboard` (Bearer) → 200;
+   trade palsu (qty di atas save) → 400; visit 2× di hari yang sama →
+   kedua `{already:true, reward:0}`; register → kode pemulihan → logout →
+   recover → login PIN baru → kode lama ditolak (401).
+   Status: **TER-DEPLOY 26 Nov 2026** — migrasi 002+003 via Management API
+   (HTTP 201; 10 tabel di `public` terverifikasi), fungsi redeploy via CLI
+   (`--no-verify-jwt`, `verify_jwt = false` tetap), smoke live 11/11
+   (`F2/smoke-live.mjs`; akun throwaway `f2s717523a/b`). Bukti lengkap:
+   `F2/LANE-F2-REPORT.md`.
+
 ## Catatan biaya & batas
 
 - Free tier Supabase: Postgres 500 MB, Edge Functions 500 ribu

@@ -27,6 +27,13 @@
 //   (COZY-E) /api/mp/* — ekonomi multiplayer, lihat seksi COZY-E di bawah:
 //   garden, trade propose/accept/decline, visit, minigame
 //   submit/results/claim, leaderboard. Semua butuh sesi Bearer.
+//   (COZY-F2) POST /api/auth/recover {username, code, pin} — pulihkan akun
+//   dengan kode pemulihan (diterbitkan sekali saat register, single-use,
+//   disimpan hanya sebagai hash; lihat seksi COZY-F2 di bawah).
+//   POST /api/auth/recovery-code (Bearer) — terbitkan kode pemulihan baru
+//   (untuk akun lama pra-v3 / kode hilang; menggantikan kode lama).
+//   Save v3 (F2): validateSave menerima v2/v3, clean selalu v:3, semua
+//   field baru Wave-1/2 masuk allowlist (lihat validateSave).
 //
 // PENTING — verifikasi JWT HARUS MATI untuk fungsi ini (config.toml:
 // [functions.lembah-hijau-api] verify_jwt = false). API ini memakai token
@@ -217,7 +224,9 @@ function normalizeUsername(u: unknown): string {
 
 const CUSTOM_ALLOW: Record<string, string[]> = {
   skin: ["fair", "medium", "tan", "brown", "deep"],
-  hairStyle: ["short", "spiky", "long", "bun", "ponytail"],
+  // COZY-F2: 'braids' (Lane A, Sari) + 'visor' (Lane A) — sebelumnya save
+  // cloud dengan tampilan baru DITOLAK server (custom tidak valid).
+  hairStyle: ["short", "spiky", "long", "bun", "ponytail", "braids"],
   hairColor: ["black", "brown", "auburn", "blond", "grey"],
   shirtModel: ["tee", "long", "overall", "vest"],
   shirtColor: [
@@ -249,7 +258,7 @@ const CUSTOM_ALLOW: Record<string, string[]> = {
     "black",
     "straw",
   ],
-  hatModel: ["none", "straw", "cap", "beanie", "bandana"],
+  hatModel: ["none", "straw", "cap", "beanie", "bandana", "visor"],
   hatColor: [
     "green",
     "pink",
@@ -282,6 +291,9 @@ const CUSTOM_ALLOW: Record<string, string[]> = {
     "straw",
   ],
 };
+// COZY-F2 — save v3: semua kunci inv (lama + Lane C + goldenEgg Lane D).
+// Kunci yang ABSEN di payload diterima sebagai 0 (klien lama / save lama);
+// kunci yang HADIR tapi di luar rentang tetap ditolak.
 const INV_KEYS = [
   "carrotSeed",
   "tomatoSeed",
@@ -292,8 +304,46 @@ const INV_KEYS = [
   "pumpkin",
   "egg",
   "milk",
+  "wheatSeed",
+  "strawberrySeed",
+  "wheat",
+  "strawberry",
+  "apple",
+  "orange",
+  "cheese",
+  "sauce",
+  "flour",
+  "fertiliser",
+  "appleSapling",
+  "orangeSapling",
+  "goldenEgg",
 ];
-const CROPS = ["carrot", "tomato", "pumpkin"];
+// Barang yang bisa dijual (subset inv untuk validasi invQ).
+const SELLABLES = [
+  "carrot",
+  "tomato",
+  "pumpkin",
+  "wheat",
+  "strawberry",
+  "apple",
+  "orange",
+  "egg",
+  "milk",
+  "cheese",
+  "sauce",
+  "flour",
+];
+const CROPS = ["carrot", "tomato", "pumpkin", "wheat", "strawberry"];
+const HIDDEN_SPOT_IDS = [
+  "sakura-grove",
+  "lake-shore",
+  "mountain-nook",
+  "old-well",
+  "windmill-back",
+];
+const NPC_IDS = ["darman", "ratna", "udin", "lestari", "joyo", "raka"];
+const QUEST_IDS = ["d-carrot", "d-harvest", "d-feed", "w-harvest", "w-gifts"];
+const SEASONS = ["spring", "summer", "autumn", "winter"];
 
 function isInt(v: unknown, min: number, max: number): v is number {
   return Number.isInteger(v) && (v as number) >= min && (v as number) <= max;
@@ -353,6 +403,12 @@ export function validateSave(
   }
   const inv: Record<string, number> = {};
   for (const k of INV_KEYS) {
+    // COZY-F2: kunci absen = 0 (save v2 / klien lama); kunci hadir tapi
+    // bukan int 0..99999 = tolak. Tanpa ini, PUT dari tab lama gagal total.
+    if (input.inv[k] === undefined || input.inv[k] === null) {
+      inv[k] = 0;
+      continue;
+    }
     if (!isInt(input.inv[k], 0, 99999)) {
       return { ok: false, error: `inv.${k} di luar rentang` };
     }
@@ -375,11 +431,16 @@ export function validateSave(
     if (!isBool(p.watered) || !isBool(p.hoed)) {
       return { ok: false, error: "plot.watered/hoed harus boolean" };
     }
+    // COZY-F2 — v3 (Lane C): tanah + pupuk per petak. Absen di save lama =
+    // default (80 / false); hadir tapi di luar rentang = default juga
+    // (field aditif, bukan inti — jangan gagalkan seluruh save karenanya).
     plots.push({
       crop: p.crop,
       growth: p.growth,
       watered: p.watered,
       hoed: p.hoed,
+      soil: isInt(p.soil, 0, 100) ? p.soil : 80,
+      fert: typeof p.fert === "boolean" ? p.fert : false,
     });
   }
   if (!Array.isArray(input.animals) || input.animals.length !== 5) {
@@ -418,10 +479,252 @@ export function validateSave(
     }
     custom[k] = input.custom[k];
   }
+  // ---------- COZY-F2 — save v3: semua field baru Wave-1 + Wave-2 ----------
+  // Aturan: v 2 (klien/save lama) atau 3 diterima; clean SELALU ditulis
+  // v:3. Field aditif yang absen = default (jangan gagalkan save lama);
+  // field yang hadir tapi malformed = tolak (kecuali soil/fert di atas).
+  if (
+    input.v !== undefined && input.v !== null && input.v !== 2 &&
+    input.v !== 3
+  ) {
+    return { ok: false, error: "versi save tidak valid" };
+  }
+  const season = typeof input.season === "string" &&
+      SEASONS.includes(input.season)
+    ? input.season
+    : "spring";
+  const discoveredSpots: string[] = Array.isArray(input.discoveredSpots)
+    ? (input.discoveredSpots as unknown[])
+      .filter((s): s is string =>
+        typeof s === "string" && HIDDEN_SPOT_IDS.includes(s)
+      ).slice(0, 32)
+    : [];
+  // invQ: {item: {good, rare}} — subset dari inv (good+rare <= total).
+  const invQ: Record<string, { good: number; rare: number }> = {};
+  if (
+    input.invQ && typeof input.invQ === "object" &&
+    !Array.isArray(input.invQ)
+  ) {
+    for (const [item, q] of Object.entries(input.invQ)) {
+      if (!SELLABLES.includes(item)) continue;
+      if (!q || typeof q !== "object") continue;
+      const total = inv[item] || 0;
+      const rare = Math.max(
+        0,
+        Math.min(total, Math.floor((q as { rare?: unknown }).rare as number) || 0),
+      );
+      const good = Math.max(
+        0,
+        Math.min(total - rare, Math.floor((q as { good?: unknown }).good as number) || 0),
+      );
+      if (good > 0 || rare > 0) invQ[item] = { good, rare };
+    }
+  }
+  // trees: 4 x {kind null|apple|orange, growth 0..2, fruit 0..3}.
+  const trees: { kind: string | null; growth: number; fruit: number }[] = [];
+  if (Array.isArray(input.trees) && input.trees.length === 4) {
+    for (const tr of input.trees) {
+      if (!tr || typeof tr !== "object") {
+        return { ok: false, error: "trees tidak valid" };
+      }
+      const t = tr as { kind?: unknown; growth?: unknown; fruit?: unknown };
+      if (!(t.kind === null || t.kind === "apple" || t.kind === "orange")) {
+        return { ok: false, error: "trees.kind tidak valid" };
+      }
+      if (!isInt(t.growth, 0, 2) || !isInt(t.fruit, 0, 3)) {
+        return { ok: false, error: "trees di luar rentang" };
+      }
+      trees.push({
+        kind: t.kind as string | null,
+        growth: t.growth as number,
+        fruit: t.fruit as number,
+      });
+    }
+  } else {
+    for (let i = 0; i < 4; i++) trees.push({ kind: null, growth: 0, fruit: 0 });
+  }
+  const machineCooldown = isInt(input.machineCooldown, 0, 9007199254740991)
+    ? input.machineCooldown
+    : 0;
+  // NPC (Lane D): pertemanan 0..999, hari hadiah/obrolan 1..10000,
+  // npcMet hanya true (termasuk penanda `${id}:lvl2paid`).
+  const npcMap = (
+    src: unknown,
+    max: number,
+  ): { ok: true; map: Record<string, number> } | { ok: false; error: string } => {
+    const out: Record<string, number> = {};
+    if (!src || typeof src !== "object") return { ok: true, map: out };
+    for (const [k, v] of Object.entries(src)) {
+      if (!NPC_IDS.includes(k) || !isInt(v, 0, max)) {
+        return { ok: false, error: "field NPC tidak valid" };
+      }
+      out[k] = v as number;
+    }
+    return { ok: true, map: out };
+  };
+  const _nf = npcMap(input.npcFriendship, 999);
+  if (!_nf.ok) return _nf;
+  const npcFriendship = _nf.map;
+  const _ng = npcMap(input.npcGiftedDay, 10000);
+  if (!_ng.ok) return _ng;
+  const npcGiftedDay = _ng.map;
+  const _nc = npcMap(input.npcChatDay, 10000);
+  if (!_nc.ok) return _nc;
+  const npcChatDay = _nc.map;
+  const npcMet: Record<string, boolean> = {};
+  if (input.npcMet && typeof input.npcMet === "object") {
+    for (const [k, v] of Object.entries(input.npcMet)) {
+      const base = k.replace(/:lvl2paid$/, "");
+      if (!NPC_IDS.includes(base) || v !== true) {
+        return { ok: false, error: "npcMet tidak valid" };
+      }
+      npcMet[k] = true;
+    }
+  }
+  // npcQuests: {day, week, daily[3], weekly[2], weekGiftNpcs[]}.
+  let npcQuests: unknown = null;
+  if (input.npcQuests !== undefined && input.npcQuests !== null) {
+    const q = input.npcQuests as {
+      day?: unknown;
+      week?: unknown;
+      daily?: unknown;
+      weekly?: unknown;
+      weekGiftNpcs?: unknown;
+    };
+    if (
+      !q || typeof q !== "object" || !isInt(q.day, 1, 10000) ||
+      !isInt(q.week, 0, 10000) || !Array.isArray(q.daily) ||
+      q.daily.length > 8 || !Array.isArray(q.weekly) || q.weekly.length > 8
+    ) {
+      return { ok: false, error: "npcQuests tidak valid" };
+    }
+    const cleanQuestList = (list: unknown[]) => {
+      const out: { id: string; progress: number; done: boolean }[] = [];
+      for (const e of list) {
+        const en = e as { id?: unknown; progress?: unknown; done?: unknown };
+        if (
+          !en || typeof en !== "object" ||
+          typeof en.id !== "string" || !QUEST_IDS.includes(en.id) ||
+          !isInt(en.progress, 0, 15) || typeof en.done !== "boolean"
+        ) {
+          return null;
+        }
+        out.push({
+          id: en.id,
+          progress: en.progress as number,
+          done: en.done as boolean,
+        });
+      }
+      return out;
+    };
+    const daily = cleanQuestList(q.daily);
+    const weekly = cleanQuestList(q.weekly);
+    if (!daily || !weekly) return { ok: false, error: "npcQuests tidak valid" };
+    if (
+      !Array.isArray(q.weekGiftNpcs) || q.weekGiftNpcs.length > 5 ||
+      (q.weekGiftNpcs as unknown[]).some((s) =>
+        typeof s !== "string" || !NPC_IDS.includes(s)
+      )
+    ) {
+      return { ok: false, error: "npcQuests.weekGiftNpcs tidak valid" };
+    }
+    npcQuests = {
+      day: q.day,
+      week: q.week,
+      daily,
+      weekly,
+      weekGiftNpcs: q.weekGiftNpcs,
+    };
+  }
+  // npcFestival: {day, talked{}, harvested 0..99, rewarded}.
+  let npcFestival: unknown = null;
+  if (input.npcFestival !== undefined && input.npcFestival !== null) {
+    const f = input.npcFestival as {
+      day?: unknown;
+      talked?: unknown;
+      harvested?: unknown;
+      rewarded?: unknown;
+    };
+    if (
+      !f || typeof f !== "object" || !isInt(f.day, 1, 10000) ||
+      !isInt(f.harvested, 0, 99) || typeof f.rewarded !== "boolean"
+    ) {
+      return { ok: false, error: "npcFestival tidak valid" };
+    }
+    const talked: Record<string, boolean> = {};
+    if (f.talked && typeof f.talked === "object") {
+      for (const [k, v] of Object.entries(f.talked)) {
+        if (!NPC_IDS.includes(k) || v !== true) {
+          return { ok: false, error: "npcFestival.talked tidak valid" };
+        }
+        talked[k] = true;
+      }
+    }
+    npcFestival = {
+      day: f.day,
+      talked,
+      harvested: f.harvested,
+      rewarded: f.rewarded,
+    };
+  }
+  // Multiplayer (Lane E): cermin lokal; server (visit/trade ledger) yang
+  // berwenang atas angkanya — di sini hanya bentuk + rentang.
+  const mpVisits: Record<string, string> = {};
+  if (input.mpVisits && typeof input.mpVisits === "object") {
+    const entries = Object.entries(input.mpVisits);
+    if (entries.length > 64) {
+      return { ok: false, error: "mpVisits terlalu banyak" };
+    }
+    for (const [k, v] of entries) {
+      if (
+        !USERNAME_RE.test(k) || typeof v !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(v)
+      ) {
+        return { ok: false, error: "mpVisits tidak valid" };
+      }
+      mpVisits[k] = v;
+    }
+  }
+  const mpTrades: unknown[] = [];
+  if (input.mpTrades !== undefined && input.mpTrades !== null) {
+    if (!Array.isArray(input.mpTrades) || input.mpTrades.length > 20) {
+      return { ok: false, error: "mpTrades tidak valid" };
+    }
+    for (const e of input.mpTrades) {
+      const en = e as {
+        id?: unknown;
+        with?: unknown;
+        give?: { item?: unknown; qty?: unknown };
+        get?: { item?: unknown; qty?: unknown };
+        at?: unknown;
+      };
+      const legOk = (leg: { item?: unknown; qty?: unknown } | undefined) =>
+        !!leg && typeof leg === "object" &&
+        typeof leg.item === "string" && INV_KEYS.includes(leg.item) &&
+        isInt(leg.qty, 1, 99);
+      if (
+        !en || typeof en !== "object" ||
+        typeof en.with !== "string" || !USERNAME_RE.test(en.with) ||
+        !legOk(en.give) || !legOk(en.get) || !isInt(en.at, 0, 9007199254740991)
+      ) {
+        return { ok: false, error: "mpTrades tidak valid" };
+      }
+      mpTrades.push({
+        id: typeof en.id === "string" ? en.id : "",
+        with: en.with,
+        give: en.give,
+        get: en.get,
+        at: en.at,
+      });
+    }
+  }
+  const mpMinigameBest = isInt(input.mpMinigameBest, 0, 200)
+    ? input.mpMinigameBest
+    : 0;
   return {
     ok: true,
     clean: {
-      v: 2,
+      v: 3,
       savedAt: Date.now(),
       updatedAt: input.updatedAt,
       username: ownerUsername,
@@ -434,6 +737,22 @@ export function validateSave(
       quality: input.quality,
       custom,
       inv,
+      // COZY-F2 — v3 (sebelumnya field-field ini DIBUANG clean, jadi
+      // round-trip cloud menghapus progres Wave-1/2).
+      season,
+      discoveredSpots,
+      invQ,
+      trees,
+      machineCooldown,
+      npcFriendship,
+      npcGiftedDay,
+      npcChatDay,
+      npcMet,
+      npcQuests,
+      npcFestival,
+      mpVisits,
+      mpTrades,
+      mpMinigameBest,
       plots,
       animals,
       player: { x: input.player.x, z: input.player.z },
@@ -537,8 +856,12 @@ async function handleRegister(
   });
   if (insErr) throw insErr;
   const session = await createSession(db, username);
+  // COZY-F2 — kode pemulihan: diterbitkan SEKALI saat register, ditampilkan
+  // SEKALI ke pemain (client wajib menampilkannya + menyuruh menyimpan).
+  // Server hanya menyimpan hash SHA-256 (bocornya DB tidak memberikan kode).
+  const recoveryCode = await issueRecoveryCode(db, username);
   console.log(`[auth] register ok username=${username}`);
-  return json(session, 201, cors);
+  return json({ ...session, recoveryCode }, 201, cors);
 }
 
 async function handleLogin(
@@ -641,6 +964,124 @@ async function handleLogout(
   }
   return json({ ok: true }, 200, cors);
 }
+
+// ---------- COZY-F2 — Pemulihan akun (kode pemulihan) ----------
+// Desain (inferensi F2, dicatat di laporan): tidak ada email di game ini,
+// jadi pemulihan memakai KODE yang diterbitkan server sekali saat register
+// dan ditampilkan sekali ke pemain ("simpan kode ini — satu-satunya jalan
+// bila PIN lupa"). Sifat keamanan:
+//   - Kode 12 karakter dari alfabet 32 huruf/angka tanpa ambiguitas
+//     (tanpa 0/O/1/I/L) = ~60 bit entropi; ditampilkan sebagai XXXX-XXXX-XXXX.
+//   - Server HANYA menyimpan hash SHA-256 kode (seperti token sesi) —
+//     bocornya DB tidak memberikan kode; kode TIDAK PERNAH ditulis ke log.
+//   - Single-use: sekali dipakai, baris dihapus + kode BARU diterbitkan
+//     (rotasi — respons recover mengembalikan kode pengganti).
+//   - Sesi: recover yang sukses menghapus SEMUA sesi lama (bila kode dicuri,
+//     pemilik sah yang memulihkan langsung menendang penyerang) + membuka
+//     lockout login; sesi baru dibuat untuk pemulih.
+//   - Rate limit 5 percobaan / 15 menit per username (+ 10/menit per IP);
+//     pesan gagal GENERIK (tidak membedakan user ada / kode salah / PIN
+//     baru tak valid) supaya tidak bisa enumerasi akun.
+//   - Akun lama (register pra-v3, tanpa kode) memakai POST
+//     /api/auth/recovery-code saat login untuk menerbitkan kode pertama.
+const RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const RECOVERY_CODE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/;
+
+function generateRecoveryCode(): string {
+  const bytes = randomBytes(12);
+  let out = "";
+  // PERHATIAN: RECOVERY_ALPHABET panjangnya 31, BUKAN 32 (I, L, O, 0, 1
+  // dibuang agar tak ambigu). Modulus HARUS alphabet.length — memakai
+  // % 32 pernah membuat indeks 31 -> undefined -> kode berisi string
+  // "undefined" (~31,7% kode!) yang lalu tak bisa dipakai pulih
+  // (RECOVERY_CODE_RE menolaknya). Ditemukan Lane F2, 26 Nov 2026.
+  for (let i = 0; i < 12; i++) out += RECOVERY_ALPHABET[bytes[i] % RECOVERY_ALPHABET.length];
+  return `${out.slice(0, 4)}-${out.slice(4, 8)}-${out.slice(8, 12)}`;
+}
+
+function normalizeRecoveryCode(code: unknown): string {
+  return String(code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+async function issueRecoveryCode(db: Db, username: string): Promise<string> {
+  const code = generateRecoveryCode();
+  const codeHash = await sha256Hex(normalizeRecoveryCode(code));
+  const { error } = await db.from("recovery_codes").upsert(
+    { username, code_hash: codeHash, created_at: Date.now() },
+    { onConflict: "username" },
+  );
+  if (error) throw error;
+  return code;
+}
+
+async function handleRecover(
+  request: Request,
+  db: Db,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ip = clientIp(request);
+  if (!(await checkRateLimit(db, `recover:ip:${ip}`, 10, 60 * 1000))) {
+    return json({ error: "Terlalu banyak percobaan. Coba lagi nanti." }, 429, cors);
+  }
+  const { data, error } = await readBody(request);
+  if (error) return json({ error }, 400, cors);
+  const username = normalizeUsername(data.username);
+  if (!(await checkRateLimit(db, `recover:user:${username}`, 5, 15 * 60 * 1000))) {
+    return json({ error: "Terlalu banyak percobaan. Coba lagi nanti." }, 429, cors);
+  }
+  const code = normalizeRecoveryCode(data.code);
+  // Pesan generik untuk SEMUA kegagalan di bawah (anti-enumerasi).
+  const genericFail = () =>
+    json({ error: "Username atau kode pemulihan salah." }, 401, cors);
+  if (!USERNAME_RE.test(username) || !RECOVERY_CODE_RE.test(code)) {
+    return genericFail();
+  }
+  if (!PIN_RE.test(String(data.pin || ""))) return genericFail();
+  const { data: user, error: userErr } = await db.from("users").select("username")
+    .eq("username", username).maybeSingle();
+  if (userErr) throw userErr;
+  if (!user) return genericFail();
+  const { data: row, error: rowErr } = await db.from("recovery_codes")
+    .select("code_hash").eq("username", username).maybeSingle();
+  if (rowErr) throw rowErr;
+  if (!row) return genericFail();
+  const expect = (row as { code_hash: string }).code_hash;
+  if (!timingSafeEqual(await sha256Hex(code), expect)) return genericFail();
+  // Sukses: konsumsi kode (single-use) + ganti PIN + tendang semua sesi.
+  const { error: delErr } = await db.from("recovery_codes").delete()
+    .eq("username", username);
+  if (delErr) throw delErr;
+  const salt = b64url(randomBytes(16));
+  const pinHash = await hashPin(String(data.pin), salt);
+  const { error: updErr } = await db.from("users").update({
+    pin_hash: pinHash,
+    salt,
+  }).eq("username", username);
+  if (updErr) throw updErr;
+  await db.from("sessions").delete().eq("username", username);
+  await db.from("login_attempts").delete().eq("username", username);
+  const session = await createSession(db, username);
+  const recoveryCode = await issueRecoveryCode(db, username);
+  console.log(`[auth] recover ok username=${username}`);
+  return json({ ...session, recoveryCode }, 200, cors);
+}
+
+async function handleIssueRecoveryCode(
+  request: Request,
+  db: Db,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const username = await authUsername(request, db);
+  if (!username) {
+    return json({ error: "Sesi tidak valid. Login lagi." }, 401, cors);
+  }
+  if (!(await checkRateLimit(db, `reccode:user:${username}`, 5, 60 * 1000))) {
+    return json({ error: "Terlalu banyak percobaan. Coba lagi nanti." }, 429, cors);
+  }
+  const recoveryCode = await issueRecoveryCode(db, username);
+  return json({ recoveryCode }, 200, cors);
+}
+// ---------- /COZY-F2 pemulihan akun ----------
 
 async function handleGetSave(
   request: Request,
@@ -797,7 +1238,11 @@ function mpSaveShapeOk(save: any): boolean {
   if (!save || typeof save !== "object") return false;
   if (!save.inv || typeof save.inv !== "object") return false;
   for (const k of INV_KEYS) {
-    if (!isInt(save.inv[k], 0, 99999)) return false;
+    // COZY-F2: kunci absen = 0 (save tersimpan pra-v3 tidak punya kunci
+    // baru Lane C/D — tanpa toleransi ini, garden/trade/visit rusak untuk
+    // semua akun lama sampai mereka menyimpan ulang).
+    const v = save.inv[k] === undefined || save.inv[k] === null ? 0 : save.inv[k];
+    if (!isInt(v, 0, 99999)) return false;
   }
   if (!Number.isInteger(save.coins) || save.coins < 0 || save.coins > MP_COIN_CAP) return false;
   if (!Array.isArray(save.plots) || save.plots.length !== 24) return false;
@@ -1287,6 +1732,13 @@ export async function handleRequest(
     }
     if (path === "/api/auth/logout" && req.method === "POST") {
       return await handleLogout(req, db, cors);
+    }
+    // COZY-F2 — pemulihan akun (lihat seksi COZY-F2).
+    if (path === "/api/auth/recover" && req.method === "POST") {
+      return await handleRecover(req, db, cors);
+    }
+    if (path === "/api/auth/recovery-code" && req.method === "POST") {
+      return await handleIssueRecoveryCode(req, db, cors);
     }
     if (path === "/api/save" && req.method === "GET") {
       return await handleGetSave(req, db, cors);
