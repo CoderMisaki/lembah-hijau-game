@@ -2078,6 +2078,16 @@ export function buildWorld(scene) {
     setQuality(q) {
       quality = q || 'medium';
       grassSway = quality !== 'low';
+      // Lane G (27 Nov 2026): bumpMap terrain (map 256 repeat 48 + anisotropy 4)
+      // adalah biaya fragment terbesar di headless (0,46 -> 0,81 FPS saat
+      // dimatikan, calls/triangles tidak berubah). Di low, matikan bump saja
+      // (map grain tetap); medium/high tidak berubah.
+      const tm = terrain.material;
+      if (quality === 'low') {
+        if (tm.bumpMap) { tm.bumpMap = null; tm.needsUpdate = true; }
+      } else if (!tm.bumpMap) {
+        tm.bumpMap = terrainTex; tm.needsUpdate = true;
+      }
       // Partikel + kupu-kupu mati total di low; update() mengatur sisanya per waktu.
       if (quality === 'low') {
         pollen.visible = false; fireflies.visible = false; petals.visible = false;
