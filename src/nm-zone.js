@@ -1,8 +1,8 @@
 // nm-zone.js: Zona Pasar Malam (Lane P).
-// Restyle visual Lane D (anime overhaul, 25 Nov 2026): semua permukaan
-// MeshToonMaterial + gradientMap 4-step (cel), palet langit/sakura/
-// matahari PRODUCT.md, papan nama display rounded, lampion + lampu
-// hangat warna anime. Koordinat, collider, perilaku, teks TIDAK berubah.
+// Restyle visual Lane E (realistis, 27 Nov 2026): semua permukaan struktur
+// MeshStandardMaterial (PBR) — dulu MeshToonMaterial + gradientMap 4-step
+// (cel). Palet, papan nama, lampion + lampu hangat dipertahankan.
+// Koordinat, collider, perilaku, teks TIDAK berubah.
 // Struktur zona saja: tanah padat + jalan, gapura + papan nama bilingual,
 // tiang lampu + string lights, obor, pagar tali, panggung sulap, kubah
 // malam lokal + bintang + lampu hangat. Stan jajanan / wahana / game
@@ -40,23 +40,14 @@ const WOOD = 0x8a6b3f, WOOD_DARK = 0x6e4a26, BARK = 0x4a3419;
 const DIRT = 0x9a7b4f, DIRT_LIGHT = 0xb59a6e, STONE = 0x8d8578;
 // Palet anime PRODUCT.md (dipakai zona): sakura / matahari / daun.
 const SAKURA = 0xff8fb3, SAKURA_DEEP = 0xff5c8a, SUN = 0xffc93c, LEAF = 0x2fbf4a;
-const INK = 0x1d2b53;
 
-// ---- Cel/toon anime: MeshToonMaterial + gradientMap 4-step (pita warna
-// tegas, bukan gradien halus Lambert). MeshBasicMaterial dipertahankan
-// hanya untuk sumber cahaya (neon, bola lampu, api, bulan, bintang).
-let _toonGrad = null;
-function toonGrad() {
-  if (_toonGrad) return _toonGrad;
-  const tex = new THREEImpl.DataTexture(new Uint8Array([90, 150, 210, 255]), 4, 1, THREEImpl.RedFormat);
-  tex.minFilter = THREEImpl.NearestFilter;
-  tex.magFilter = THREEImpl.NearestFilter;
-  tex.needsUpdate = true;
-  _toonGrad = tex;
-  return tex;
-}
+// ---- Material struktur PBR (Lane E, 27 Nov 2026): MeshStandardMaterial,
+// dulu MeshToonMaterial + gradientMap 4-step (cel). MeshBasicMaterial
+// dipertahankan hanya untuk sumber cahaya (neon, bola lampu, api, bulan,
+// bintang) — itu memang tidak kena cahaya.
 function lam(color, opts = {}) {
-  return new THREEImpl.MeshToonMaterial({ color, gradientMap: toonGrad(), ...opts });
+  const { roughness = 0.85, metalness = 0, ...rest } = opts;
+  return new THREEImpl.MeshStandardMaterial({ color, roughness, metalness, ...rest });
 }
 function basic(color, opts = {}) {
   return new THREEImpl.MeshBasicMaterial({ color, ...opts });
@@ -119,7 +110,7 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
   // pita transisi terrain) + tepi batu + jalan utama/silang.
   const ground = new T.Mesh(
     new T.PlaneGeometry(36, 86),
-    new T.MeshToonMaterial({ map: dirtTexture(), gradientMap: toonGrad() }),
+    new T.MeshStandardMaterial({ map: dirtTexture(), roughness: 0.95, metalness: 0 }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(80, Y + 0.07, -3);
@@ -142,7 +133,7 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
   // tanpa overlap, tanpa z-fight).
   const groundAnnex = new T.Mesh(
     new T.PlaneGeometry(28, 9),
-    new T.MeshToonMaterial({ map: dirtTexture(), gradientMap: toonGrad() }),
+    new T.MeshStandardMaterial({ map: dirtTexture(), roughness: 0.95, metalness: 0 }),
   );
   groundAnnex.rotation.x = -Math.PI / 2;
   groundAnnex.position.set(88, Y + 0.07, -50.5);
@@ -423,15 +414,8 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
   moon.renderOrder = 11;
   moon.visible = false;
   group.add(moon);
-  // Cincin outline tinta di sekeliling bulan (cel — bulan ikut bergaris
-  // tegas seperti matahari bergaris di langit siang).
-  const moonRingMat = basic(INK, { transparent: true, opacity: 0, fog: false, depthWrite: false });
-  const moonRing = new T.Mesh(new T.RingGeometry(3.0, 3.4, 24), moonRingMat);
-  moonRing.position.copy(moon.position);
-  moonRing.lookAt(80, Y + 2, -3);
-  moonRing.renderOrder = 11;
-  moonRing.visible = false;
-  group.add(moonRing);
+  // (Lane E: cincin outline tinta di sekeliling bulan DIHAPUS — outline
+  // tidak dipakai lagi di struktur zona.)
 
   // ---- Lampu hangat di dalam zona (4–6 PointLight; sisanya emissive).
   const lightSpots = [
@@ -480,7 +464,6 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
     dome.visible = on;
     stars.visible = on;
     moon.visible = on;
-    moonRing.visible = on;
     // Lampu: sembunyikan total saat jauh (intensitasnya memang 0 di sana).
     // Lampu yang tidak terlihat dikeluarkan three.js dari program shader,
     // menghemat biaya fragment di semua piksel — diukur headless di spawn:
@@ -490,7 +473,6 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
       domeMat.opacity = 0.85 * k;
       starMat.opacity = 0.95 * k;
       moonMat.opacity = 0.95 * k;
-      moonRingMat.opacity = 0.95 * k;
       for (const li of lights) li.intensity = 26 * k;
     } else {
       for (const li of lights) li.intensity = 0;
@@ -499,7 +481,7 @@ export function buildNightMarketZone(scene, THREE, ctx = {}) {
 
   return {
     group, colliders, minimap, update, interactables: [],
-    dome, stars, moon, moonRing, lights,
+    dome, stars, moon, lights,
     get nightFactor() { return nightFactor; },
   };
 }
