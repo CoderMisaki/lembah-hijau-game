@@ -12,13 +12,19 @@ export const HOUSE = { minX: -3, maxX: 5, minZ: -26, maxZ: -19 }; // rumah pemai
 export const SHOP = { minX: -12, maxX: -6, minZ: -26, maxZ: -20 }; // kios toko
 export const CRATE_START = { x: 7, z: -15 };
 
-// ---- Anime cel/toon kit (Lane A): gradientMap 4-step + outline ink.
-// Semua material dunia memakai MeshToonMaterial via mat()/toonMat().
+// ---- Material dunia: PBR (Lane A, 27 Nov 2026): MeshStandardMaterial.
+// Dulu MeshToonMaterial + gradientMap 4-step (cel anime). Nama helper
+// toonMat()/mat() DIPERTAHANKAN supaya call site di world.js, farm.js,
+// animals.js, economy.js (via main.js) tidak pecah — yang berubah hanya
+// implementasinya. Default PBR dunia: roughness 0.85, metalness 0 (tanah,
+// kayu, daun, batu); air/kaca/window meng-override roughness lewat opts.
+// TOON_GRADIENT dipertahankan sebagai ekspor (deprecated, tidak lagi dipakai
+// material mana pun) supaya import lama di luar lane ini tidak pecah.
 // Token PRODUCT.md: ink #1d2b53, sky #3fa9f5, sakura #ff8fb3, sun #ffc93c,
 // leaf #2fbf4a, valley #4fc94f, cream #fff1c4.
 export const INK = 0x1d2b53;
 export const TOON_GRADIENT = (() => {
-  const data = new Uint8Array([90, 150, 210, 255]); // 4 step cel
+  const data = new Uint8Array([90, 150, 210, 255]); // 4 step cel (legacy, tidak dipakai lagi)
   const tex = new THREE.DataTexture(data, 4, 1, THREE.RedFormat);
   tex.minFilter = THREE.NearestFilter;
   tex.magFilter = THREE.NearestFilter;
@@ -26,11 +32,15 @@ export const TOON_GRADIENT = (() => {
   return tex;
 })();
 export function toonMat(color, opts = {}) {
-  return new THREE.MeshToonMaterial({ color, gradientMap: TOON_GRADIENT, ...opts });
+  const { roughness = 0.85, metalness = 0, ...rest } = opts;
+  return new THREE.MeshStandardMaterial({ color, roughness, metalness, ...rest });
 }
 // Outline tegas anime: inverted hull (BackSide, warna ink) sebagai anak mesh.
-// Hanya untuk objek hero (rumah, pohon sakura hero, hewan, wahana besar);
-// objek kecil/instanced cukup toon shading.
+// LANE A: TIDAK LAGI dipakai di world.js (semua 32 call site dihapus —
+// terrain/bangunan/props realistis tanpa outline). Fungsi tetap diekspor
+// karena farm.js / animals.js / economy.js masih mengimpornya (file di luar
+// lane ini); outline karakter (player.js) punya helper sendiri dan tidak
+// disentuh.
 export function addOutline(mesh, s = 1.035) {
   const o = new THREE.Mesh(mesh.geometry,
     new THREE.MeshBasicMaterial({ color: INK, side: THREE.BackSide }));
@@ -227,7 +237,7 @@ export function buildWorld(scene) {
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
-  const terrain = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: TOON_GRADIENT }));
+  const terrain = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }));
   terrain.receiveShadow = true;
   group.add(terrain);
 
@@ -299,13 +309,14 @@ export function buildWorld(scene) {
       h: 48 + rnd() * 22, rad: 26 + rnd() * 14, near: false });
   }
   // Kerucut non-indexed + computeVertexNormals = faset datar
-  // (pengganti flatShading, yang tidak didukung MeshToonMaterial).
+  // (MeshStandardMaterial juga mendukung flatShading, tapi normal per-faset
+  // dari geometri non-indexed sudah memberi hasil yang sama).
   const mtnGeo = new THREE.ConeGeometry(1, 1, 6).toNonIndexed();
   mtnGeo.computeVertexNormals();
   const mtns = new THREE.InstancedMesh(mtnGeo,
-    new THREE.MeshToonMaterial({ gradientMap: TOON_GRADIENT }), mtnSpots.length);
+    new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0 }), mtnSpots.length);
   const snowCaps = new THREE.InstancedMesh(mtnGeo,
-    new THREE.MeshToonMaterial({ color: 0xf4f8ff, gradientMap: TOON_GRADIENT }), mtnSpots.length);
+    new THREE.MeshStandardMaterial({ color: 0xf4f8ff, roughness: 0.9, metalness: 0 }), mtnSpots.length);
   const cMtnNearA = new THREE.Color(0x6fae7d), cMtnNearB = new THREE.Color(0x8fd0a0);
   const cMtnFarA = new THREE.Color(0x7d8aa0), cMtnFarB = new THREE.Color(0x9aa7bd);
   mtnSpots.forEach((m, i) => {
@@ -354,10 +365,10 @@ export function buildWorld(scene) {
     wpos.setX(i, riverCenterX(z) + wpos.getX(i));
   }
   waterGeo.computeVertexNormals();
-  // Toon: air langit cerah + tekstur mengalir + riak vertex + buih putih
-  // bergerak (highlight). Opacity saja — tanpa refleksi mahal.
-  const water = new THREE.Mesh(waterGeo, new THREE.MeshToonMaterial({
-    map: waterTex, transparent: true, opacity: 0.62, gradientMap: TOON_GRADIENT,
+  // PBR: air agak mengkilap (roughness rendah) + transparan supaya dasar
+  // pasir terlihat; tekstur mengalir + riak vertex + buih tetap seperti dulu.
+  const water = new THREE.Mesh(waterGeo, new THREE.MeshStandardMaterial({
+    map: waterTex, transparent: true, opacity: 0.62, roughness: 0.15, metalness: 0.1,
   }));
   water.position.y = WATER_Y;
   group.add(water);
@@ -426,7 +437,7 @@ export function buildWorld(scene) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, WALL_H, d), wallMat);
     m.position.set(px, hy + WALL_H / 2, pz);
     m.castShadow = true; m.receiveShadow = true;
-    addOutline(m);
+
     house.add(m);
     return m;
   }
@@ -435,7 +446,7 @@ export function buildWorld(scene) {
   wallPanel(WALL_T, 6 - 2 * WALL_T, hx + 4 - WALL_T / 2, hz); // kanan
   const roof = new THREE.Mesh(new THREE.ConeGeometry(6.4, 2.6, 4), mat(0x9a4a2f));
   roof.position.set(hx, hy + 4.7, hz); roof.rotation.y = Math.PI / 4; roof.castShadow = true;
-  addOutline(roof);
+
   house.add(roof);
   // Bagian depan (dinding depan + pintu + jendela + tangga): satu grup supaya
   // show() kamar bisa menyembunyikannya sekaligus saat interior tampil.
@@ -443,13 +454,13 @@ export function buildWorld(scene) {
   const frontWall = new THREE.Mesh(new THREE.BoxGeometry(8, WALL_H, WALL_T), wallMat);
   frontWall.position.set(hx, hy + WALL_H / 2, hz + 3 - WALL_T / 2);
   frontWall.castShadow = true; frontWall.receiveShadow = true;
-  addOutline(frontWall);
+
   houseFront.add(frontWall);
   const door = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.2, 0.2), mat(0x6e4a26));
   door.position.set(hx, hy + 1.1, hz + 3.05); houseFront.add(door);
   // Jendela menyala hangat — emissive dinaikkan saat senja/malam di update().
   // winMat dipakai bersama semua rumah desa + kincir, jadi ikut menyala juga.
-  const winMat = new THREE.MeshToonMaterial({ color: 0xffe9a8, emissive: 0xff9a3c, emissiveIntensity: 0.25, gradientMap: TOON_GRADIENT });
+  const winMat = new THREE.MeshStandardMaterial({ color: 0xffe9a8, emissive: 0xff9a3c, emissiveIntensity: 0.25, roughness: 0.4, metalness: 0 });
   for (const wx of [hx - 2.4, hx + 2.4]) {
     const win = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.1, 0.15), winMat);
     win.position.set(wx, hy + 1.9, hz + 3.05); houseFront.add(win);
@@ -466,7 +477,7 @@ export function buildWorld(scene) {
   step.position.set(hx, hy + 0.12, hz + 3.4); step.receiveShadow = true; houseFront.add(step);
   house.add(houseFront);
   const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), mat(0x8d8578));
-  chimney.position.set(hx + 2.2, hy + 5.2, hz - 1); addOutline(chimney); house.add(chimney);
+  chimney.position.set(hx + 2.2, hy + 5.2, hz - 1); house.add(chimney);
   // Lampu teras (menyala saat malam)
   const lamp = new THREE.PointLight(0xffc46b, 0, 14, 1.6);
   lamp.position.set(hx, hy + 2.6, hz + 3.6);
@@ -545,9 +556,9 @@ export function buildWorld(scene) {
   const sx = (SHOP.minX + SHOP.maxX) / 2, sz = (SHOP.minZ + SHOP.maxZ) / 2;
   const sy = terrainHeight(sx, sz);
   const stall = new THREE.Mesh(new THREE.BoxGeometry(6, 2.4, 4), mat(0xd8b36a));
-  stall.position.set(sx, sy + 1.2, sz); stall.castShadow = true; addOutline(stall); shop.add(stall);
+  stall.position.set(sx, sy + 1.2, sz); stall.castShadow = true; shop.add(stall);
   const shopRoof = new THREE.Mesh(new THREE.ConeGeometry(4.6, 1.8, 4), mat(0xb03a2e));
-  shopRoof.position.set(sx, sy + 3.3, sz); shopRoof.rotation.y = Math.PI / 4; addOutline(shopRoof); shop.add(shopRoof);
+  shopRoof.position.set(sx, sy + 3.3, sz); shopRoof.rotation.y = Math.PI / 4; shop.add(shopRoof);
   const counter = new THREE.Mesh(new THREE.BoxGeometry(5, 1, 0.8), mat(0x6e4a26));
   counter.position.set(sx, sy + 0.5, sz + 2.4); shop.add(counter);
   // Papan nama toko (tekstur canvas prosedural "TOKO") di depan, di bawah atap.
@@ -559,7 +570,7 @@ export function buildWorld(scene) {
   sg.fillStyle = '#fff8dc'; sg.font = 'bold 40px "Trebuchet MS", "Arial Rounded MT Bold", sans-serif';
   sg.textAlign = 'center'; sg.textBaseline = 'middle'; sg.fillText('TOKO', 128, 34);
   const sign = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.8, 0.12),
-    new THREE.MeshToonMaterial({ map: new THREE.CanvasTexture(signCanvas), gradientMap: TOON_GRADIENT }));
+    new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(signCanvas), roughness: 0.85, metalness: 0 }));
   sign.position.set(sx, sy + 2.55, sz + 2.12); shop.add(sign);
   // Keranjang hasil panen di depan kios (di luar collider SHOP, tanpa collider).
   for (const [bx, cols] of [[sx - 2.4, [0xe87a2a, 0xd9382b]], [sx + 2.4, [0x9ccb5e, 0xe8912a]]]) {
@@ -586,14 +597,14 @@ export function buildWorld(scene) {
     const wallH = 3.0 + (h.w - 5) * 0.2;
     const walls = new THREE.Mesh(new THREE.BoxGeometry(h.w, wallH, h.d), mat(h.wall));
     walls.position.set(0, y + wallH / 2, 0); walls.castShadow = true; walls.receiveShadow = true;
-    addOutline(walls);
+
     g.add(walls);
     if (h.roofType === 'pyramid') {
       const r = new THREE.Mesh(new THREE.ConeGeometry(Math.hypot(h.w, h.d) / 2 * 0.95, 2.2, 4), mat(h.roof));
-      r.position.set(0, y + wallH + 1.1, 0); r.rotation.y = Math.PI / 4; r.castShadow = true; addOutline(r); g.add(r);
+      r.position.set(0, y + wallH + 1.1, 0); r.rotation.y = Math.PI / 4; r.castShadow = true; g.add(r);
     } else if (h.roofType === 'cone') {
       const r = new THREE.Mesh(new THREE.ConeGeometry(h.w * 0.62, 2.4, 8), mat(h.roof));
-      r.position.set(0, y + wallH + 1.2, 0); r.castShadow = true; addOutline(r); g.add(r);
+      r.position.set(0, y + wallH + 1.2, 0); r.castShadow = true; g.add(r);
     } else { // gable (pelana): dua papan miring bertemu di bubungan
       const rise = h.d * 0.3;
       const half = h.d / 2 + 0.3;
@@ -602,7 +613,7 @@ export function buildWorld(scene) {
       for (const s of [1, -1]) {
         const slab = new THREE.Mesh(new THREE.BoxGeometry(h.w + 0.8, 0.15, slabLen), mat(h.roof));
         slab.position.set(0, y + wallH + rise / 2, s * (h.d / 4 + 0.12));
-        slab.rotation.x = s * ang; slab.castShadow = true; addOutline(slab, 1.06); g.add(slab);
+        slab.rotation.x = s * ang; slab.castShadow = true; g.add(slab);
       }
     }
     const door = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.1, 0.15), mat(0x6e4a26));
@@ -613,7 +624,7 @@ export function buildWorld(scene) {
     }
     if (h.chimney) {
       const ch = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.6, 0.7), mat(0x8d8578));
-      ch.position.set(h.w / 4, y + wallH + 1.5, -h.d / 4); addOutline(ch); g.add(ch);
+      ch.position.set(h.w / 4, y + wallH + 1.5, -h.d / 4); g.add(ch);
     }
     const step = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.22, 0.8), mat(0x8d8578));
     step.position.set(0, y + 0.11, h.d / 2 + 0.45); step.receiveShadow = true; g.add(step);
@@ -638,7 +649,7 @@ export function buildWorld(scene) {
   const wellY = terrainHeight(SQUARE.x, SQUARE.z);
   const well = new THREE.Group();
   const wellBase = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.1, 1.0, 8), mat(0x8d8578));
-  wellBase.position.y = 0.5; wellBase.castShadow = true; addOutline(wellBase); well.add(wellBase);
+  wellBase.position.y = 0.5; wellBase.castShadow = true; well.add(wellBase);
   const wellDark = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.12, 8), mat(0x2b2118));
   wellDark.position.y = 1.02; well.add(wellDark);
   for (const s of [-1, 1]) {
@@ -646,7 +657,7 @@ export function buildWorld(scene) {
     post.position.set(s * 0.95, 1.2, 0); well.add(post);
   }
   const wellRoof = new THREE.Mesh(new THREE.ConeGeometry(1.5, 1.0, 4), mat(0x8a4a2f));
-  wellRoof.position.y = 2.9; wellRoof.rotation.y = Math.PI / 4; wellRoof.castShadow = true; addOutline(wellRoof); well.add(wellRoof);
+  wellRoof.position.y = 2.9; wellRoof.rotation.y = Math.PI / 4; wellRoof.castShadow = true; well.add(wellRoof);
   well.position.set(SQUARE.x, wellY, SQUARE.z);
   group.add(well);
   colliders.push({ minX: SQUARE.x - 1.2, maxX: SQUARE.x + 1.2, minZ: SQUARE.z - 1.2, maxZ: SQUARE.z + 1.2 });
@@ -666,8 +677,8 @@ export function buildWorld(scene) {
 
   // ---- Danau kedua + dermaga kayu (timur laut). Air dangkal, dasar pasir terlihat.
   const lakeWater = new THREE.Mesh(new THREE.CircleGeometry(1, 28),
-    new THREE.MeshToonMaterial({ color: 0x3fa9f5, transparent: true, opacity: 0.7,
-      gradientMap: TOON_GRADIENT }));
+    new THREE.MeshStandardMaterial({ color: 0x3fa9f5, transparent: true, opacity: 0.7,
+      roughness: 0.12, metalness: 0.05 }));
   lakeWater.geometry.rotateX(-Math.PI / 2);
   lakeWater.scale.set(LAKE.rx, 1, LAKE.rz);
   lakeWater.position.set(LAKE.x, 0.05, LAKE.z);
@@ -688,9 +699,9 @@ export function buildWorld(scene) {
   const windmillY = terrainHeight(WINDMILL.x, WINDMILL.z);
   const windmill = new THREE.Group();
   const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 2.2, 9, 8), mat(0xd8c9a8));
-  tower.position.y = 4.5; tower.castShadow = true; addOutline(tower); windmill.add(tower);
+  tower.position.y = 4.5; tower.castShadow = true; windmill.add(tower);
   const cap = new THREE.Mesh(new THREE.ConeGeometry(1.9, 2.0, 8), mat(0x8a4a2f));
-  cap.position.y = 10; cap.castShadow = true; addOutline(cap); windmill.add(cap);
+  cap.position.y = 10; cap.castShadow = true; windmill.add(cap);
   const wmDoor = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.0, 0.15), mat(0x6e4a26));
   wmDoor.position.set(0, 1.0, 2.1); windmill.add(wmDoor);
   const wmWin = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.12), winMat);
@@ -751,9 +762,9 @@ export function buildWorld(scene) {
   const hayX = PEN.minX - 2.2, hayZ = PEN.maxZ + 1.6;
   const hayY = terrainHeight(hayX, hayZ);
   const hayBase = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.3, 0.9, 8), mat(0xd9a441));
-  hayBase.position.y = 0.45; hayBase.castShadow = true; addOutline(hayBase); hay.add(hayBase);
+  hayBase.position.y = 0.45; hayBase.castShadow = true; hay.add(hayBase);
   const hayTop = new THREE.Mesh(new THREE.ConeGeometry(1.25, 1.4, 8), mat(0xe8b84a));
-  hayTop.position.y = 1.55; hayTop.castShadow = true; addOutline(hayTop); hay.add(hayTop);
+  hayTop.position.y = 1.55; hayTop.castShadow = true; hay.add(hayTop);
   hay.position.set(hayX, hayY, hayZ);
   group.add(hay);
 
@@ -984,12 +995,12 @@ export function buildWorld(scene) {
     const sy2 = terrainHeight(sx2, sz2);
     const sak = new THREE.Group();
     const strunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.36, 2.4, 6), mat(0x5a3d24));
-    strunk.position.y = 1.2; strunk.castShadow = true; addOutline(strunk); sak.add(strunk);
+    strunk.position.y = 1.2; strunk.castShadow = true; sak.add(strunk);
     const sakCols = [0xff8fb3, 0xffb3c9, 0xff5c8a];
     for (let k = 0; k < 3; k++) {
       const blob = new THREE.Mesh(new THREE.SphereGeometry(1.35 - k * 0.25, 10, 8), mat(sakCols[k]));
       blob.position.set((k - 1) * 0.9, 2.9 + k * 0.55, (k % 2 ? -0.4 : 0.35));
-      blob.scale.y = 0.8; blob.castShadow = true; addOutline(blob, 1.04); sak.add(blob);
+      blob.scale.y = 0.8; blob.castShadow = true; sak.add(blob);
       heroSakuraBlobs.push({ mesh: blob, k });
     }
     sak.position.set(sx2, sy2, sz2);
@@ -1183,7 +1194,7 @@ export function buildWorld(scene) {
   const crate = new THREE.Group();
   const crateMesh = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.4, 1.4), mat(0xa97c50));
   crateMesh.castShadow = true; crateMesh.receiveShadow = true;
-  addOutline(crateMesh);
+
   crate.add(crateMesh);
   const band = new THREE.Mesh(new THREE.BoxGeometry(1.46, 0.25, 1.46), mat(0x6e4a26));
   crate.add(band);
@@ -1297,14 +1308,14 @@ export function buildWorld(scene) {
   // dipakai untuk semua yang berulang (lampion, lempeng batu, alang-alang,
   // batu sungai, pagar kincir, semak pagar, batu penanda, barang lapak).
   // Lapak pasar di sekitar alun-alun (counter + atap + tiang; barang = 1 InstancedMesh).
-  const lanternMat = new THREE.MeshToonMaterial({ color: 0xffe9a8, emissive: 0xff9a3c, emissiveIntensity: 0.25, gradientMap: TOON_GRADIENT });
+  const lanternMat = new THREE.MeshStandardMaterial({ color: 0xffe9a8, emissive: 0xff9a3c, emissiveIntensity: 0.25, roughness: 0.4, metalness: 0 });
   function makeStall(x, z, rotY, awningColor) {
     const g = new THREE.Group();
     const cy = terrainHeight(x, z);
     const counter = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.0, 1.0), mat(0x8a6b3f));
-    counter.position.y = 0.5; counter.castShadow = true; addOutline(counter, 1.04); g.add(counter);
+    counter.position.y = 0.5; counter.castShadow = true; g.add(counter);
     const awning = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.12, 1.6), mat(awningColor));
-    awning.position.set(0, 2.2, 0.1); awning.rotation.x = 0.12; awning.castShadow = true; addOutline(awning, 1.04); g.add(awning);
+    awning.position.set(0, 2.2, 0.1); awning.rotation.x = 0.12; awning.castShadow = true; g.add(awning);
     for (const s of [-1.2, 1.2]) {
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 2.2, 6), mat(0x6e4a26));
       post.position.set(s, 1.1, 0.75); g.add(post);
@@ -1412,9 +1423,9 @@ export function buildWorld(scene) {
   for (const [hx2, hz2] of [[-52, 58], [-64, 50]]) {
     const hy2 = terrainHeight(hx2, hz2);
     const hb = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.2, 0.8, 8), mat(0xd9a441));
-    hb.position.set(hx2, hy2 + 0.4, hz2); hb.castShadow = true; addOutline(hb); group.add(hb);
+    hb.position.set(hx2, hy2 + 0.4, hz2); hb.castShadow = true; group.add(hb);
     const ht = new THREE.Mesh(new THREE.ConeGeometry(1.15, 1.3, 8), mat(0xe8b84a));
-    ht.position.set(hx2, hy2 + 1.4, hz2); ht.castShadow = true; addOutline(ht); group.add(ht);
+    ht.position.set(hx2, hy2 + 1.4, hz2); ht.castShadow = true; group.add(ht);
   }
   const wmPosts = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.12, 0.14, 1.3, 6), mat(0x8a6b3f), 10);
   for (let i = 0; i < 10; i++) {
@@ -1444,14 +1455,14 @@ export function buildWorld(scene) {
   const toriiMat = mat(0xc0392b);
   for (const s of [-1.3, 1.3]) {
     const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 3.4, 8), toriiMat);
-    pillar.position.set(s, 1.7, 0); pillar.castShadow = true; addOutline(pillar, 1.05); torii.add(pillar);
+    pillar.position.set(s, 1.7, 0); pillar.castShadow = true; torii.add(pillar);
     const wx = 29 + s * 0.514, wz = -31 + s * 0.857;
     colliders.push({ minX: wx - 0.3, maxX: wx + 0.3, minZ: wz - 0.3, maxZ: wz + 0.3 });
   }
   const kasagi = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.28, 0.3), toriiMat);
-  kasagi.position.y = 3.5; kasagi.castShadow = true; addOutline(kasagi, 1.04); torii.add(kasagi);
+  kasagi.position.y = 3.5; kasagi.castShadow = true; torii.add(kasagi);
   const shimaki = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.2, 0.24), toriiMat);
-  shimaki.position.y = 3.1; addOutline(shimaki, 1.04); torii.add(shimaki);
+  shimaki.position.y = 3.1; torii.add(shimaki);
   const plaque = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.1), mat(0x6e4a26));
   plaque.position.y = 3.3; torii.add(plaque);
   torii.position.set(29, terrainHeight(29, -31), -31);
@@ -1487,7 +1498,7 @@ export function buildWorld(scene) {
   // Sumur tua (lokasi tersembunyi 'old-well', di (-60,-40)): batu + atap.
   const oldWell = new THREE.Group();
   const owBase = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.8, 0.8, 8), mat(0x8d8578));
-  owBase.position.y = 0.4; owBase.castShadow = true; addOutline(owBase); oldWell.add(owBase);
+  owBase.position.y = 0.4; owBase.castShadow = true; oldWell.add(owBase);
   const owDark = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.1, 8), mat(0x2b2118));
   owDark.position.y = 0.82; oldWell.add(owDark);
   for (const s of [-0.65, 0.65]) {
@@ -1495,15 +1506,15 @@ export function buildWorld(scene) {
     post.position.set(s, 0.85, 0); oldWell.add(post);
   }
   const owRoof = new THREE.Mesh(new THREE.ConeGeometry(1.05, 0.7, 4), mat(0x8a4a2f));
-  owRoof.position.y = 2.0; owRoof.rotation.y = Math.PI / 4; addOutline(owRoof, 1.04); oldWell.add(owRoof);
+  owRoof.position.y = 2.0; owRoof.rotation.y = Math.PI / 4; oldWell.add(owRoof);
   oldWell.position.set(-60, terrainHeight(-60, -40), -40);
   group.add(oldWell);
   colliders.push({ minX: -60.9, maxX: -59.1, minZ: -40.9, maxZ: -39.1 });
   // Jerami mini di belakang kincir (lokasi 'windmill-back').
   const wbHay = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 0.7, 8), mat(0xd9a441));
-  wbHay.position.set(-68, terrainHeight(-68, 62) + 0.35, 62); wbHay.castShadow = true; addOutline(wbHay); group.add(wbHay);
+  wbHay.position.set(-68, terrainHeight(-68, 62) + 0.35, 62); wbHay.castShadow = true; group.add(wbHay);
   const wbHayTop = new THREE.Mesh(new THREE.ConeGeometry(1.05, 1.2, 8), mat(0xe8b84a));
-  wbHayTop.position.set(-68, terrainHeight(-68, 62) + 1.25, 62); wbHayTop.castShadow = true; addOutline(wbHayTop); group.add(wbHayTop);
+  wbHayTop.position.set(-68, terrainHeight(-68, 62) + 1.25, 62); wbHayTop.castShadow = true; group.add(wbHayTop);
 
   // ---- Matahari + cahaya (anime: matahari emas hangat, hemisphere biru/krem)
   const sun = new THREE.DirectionalLight(0xffc93c, 2.2);

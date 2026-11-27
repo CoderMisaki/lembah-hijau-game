@@ -201,6 +201,14 @@ class Game {
     const canvas = document.getElementById('game-canvas');
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    // Lane A (27 Nov 2026) — pipeline PBR realistis: tone mapping filmik +
+    // output sRGB. HUD/UI adalah DOM (bukan WebGL) jadi tidak ikut gelap/
+    // berubah oleh tone mapping ini. Exposure 1.0 = netral; bila scene
+    // terasa gelap/terang setelah pergantian material, yang diubah angka ini
+    // (bukan intensitas lampu per-stop di world.js).
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.scene = new THREE.Scene();
